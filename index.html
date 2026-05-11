@@ -3264,8 +3264,8 @@ function GrantsView({ grants, people, onAdd, onEdit, onDelete, onConvertToProjec
   const GRANT_STATUSES = ["Considering", "Applying", "Submitted", "Awarded", "Unsuccessful"];
   const STATUS_COLORS_G = { "Considering": { bg: "#f3f4f6", text: "#4b5563", dot: "#9ca3af" }, "Applying": { bg: "#dbeafe", text: "#1d4ed8", dot: "#3b82f6" }, "Submitted": { bg: "#fef9c3", text: "#854d0e", dot: "#eab308" }, "Awarded": { bg: "#dcfce7", text: "#166534", dot: "#22c55e" }, "Unsuccessful": { bg: "#fee2e2", text: "#991b1b", dot: "#ef4444" } };
 
-  const totalAwarded = grants.filter(g => g.status === "Awarded").reduce((s, g) => s + (parseFloat(g.amount)||0), 0);
-  const totalPipeline = grants.filter(g => ["Applying","Submitted"].includes(g.status)).reduce((s, g) => s + (parseFloat(g.amount)||0), 0);
+  const totalAwarded = grants.filter(g => g.status === "Awarded").reduce((s, g) => s + (parseFloat(g.amount)||0), 0) || 0;
+  const totalPipeline = grants.filter(g => ["Applying","Submitted"].includes(g.status)).reduce((s, g) => s + (parseFloat(g.amount)||0), 0) || 0;
 
   return (
     <div>
@@ -3284,7 +3284,7 @@ function GrantsView({ grants, people, onAdd, onEdit, onDelete, onConvertToProjec
           { label: "Awarded", value: totalAwarded >= 1000000 ? "$"+(totalAwarded/1e6).toFixed(2).replace(/\.?0+$/,'')+"M" : "$"+(totalAwarded/1000).toFixed(0)+"k", color: "#16a34a" },
           { label: "In Pipeline", value: totalPipeline >= 1000000 ? "$"+(totalPipeline/1e6).toFixed(2).replace(/\.?0+$/,'')+"M" : "$"+(totalPipeline/1000).toFixed(0)+"k", color: "#2563eb" },
           { label: "Total Tracked", value: grants.length, color: "#0f1f3d" },
-          { label: "Success Rate", value: grants.length > 0 ? Math.round((grants.filter(g=>g.status==="Awarded").length / Math.max(grants.filter(g=>["Awarded","Unsuccessful"].includes(g.status)).length, 1))*100)+"%" : "—", color: "#7c3aed" },
+          { label: "Success Rate", value: grants.length > 0 ? (Math.round((grants.filter(g=>g.status==="Awarded").length / Math.max(grants.filter(g=>["Awarded","Unsuccessful"].includes(g.status)).length, 1))*100)||0)+"%" : "—", color: "#7c3aed" },
         ].map(s => (
           <div key={s.label} style={{ background: "#fff", borderRadius: 3, padding: "18px", border: "1px solid #e2e5ea", borderBottom: "3px solid "+s.color }}>
             <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 900, color: s.color }}>{s.value}</div>
@@ -3363,9 +3363,11 @@ function GrantsView({ grants, people, onAdd, onEdit, onDelete, onConvertToProjec
                     {g.externalPartners?.length > 0 && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0 }}>Partners</span>
-                        {g.externalPartners.map(name => (
-                          <span key={name} style={{ fontSize: 11, color: "#6b7280", background: "#f3f4f6", padding: "2px 8px", borderRadius: 99, fontWeight: 600 }}>{name}</span>
-                        ))}
+                        {g.externalPartners.map((p, i) => {
+                          const label = typeof p === 'string' ? p : (p?.name || '');
+                          const key = typeof p === 'string' ? p : (p?.id || i);
+                          return <span key={key} style={{ fontSize: 11, color: "#6b7280", background: "#f3f4f6", padding: "2px 8px", borderRadius: 99, fontWeight: 600 }}>{label}</span>;
+                        })}
                       </div>
                     )}
                     {/* In-kind */}
