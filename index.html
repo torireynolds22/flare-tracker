@@ -32,6 +32,9 @@
 // alter table outputs enable row level security;
 // alter table grants enable row level security;
 // alter table contacts enable row level security;
+// create table if not exists salary (id text primary key, data jsonb not null, updated_at timestamp default now());
+// alter table salary enable row level security;
+// create policy "allow all" on salary for all using (true) with check (true);
 const SUPABASE_URL = 'https://tehahfmlxeafkqkjkvlq.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRlaGFoZm1seGVhZmtxa2prdmxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxOTkzMzYsImV4cCI6MjA5Mzc3NTMzNn0.qOlyCyTaCI6HPVyUNHOl0BEyZwzXzjaKlwDJiOfDYnY';
 async function sbFetch(path, options = {}) {
@@ -361,7 +364,7 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [p, pe, d, out, gr, con, ob] = await Promise.all([
+        const [p, pe, d, out, gr, con, ob, sal] = await Promise.all([
           loadTable("projects"),
           loadTable("people"),
           loadTable("deliverables"),
@@ -369,6 +372,7 @@ function App() {
           loadTable("grants").catch(() => []),
           loadTable("contacts").catch(() => []),
           loadTable("onboarding").catch(() => []),
+          loadTable("salary").catch(() => []),
         ]);
         setProjects(p);
         setPeople(pe);
@@ -388,6 +392,10 @@ function App() {
         setOnboardingChecklist(obChecklist);
         setOnboardingTraining(obTraining);
         setOnboardingNotes(obNotes);
+        // Load salary allocations
+        const salMap = {};
+        sal.forEach(rec => { salMap[rec.id] = rec; });
+        setSalaryAllocations(salMap);
         // If all tables are empty, prompt user to seed
         if (p.length === 0 && pe.length === 0 && d.length === 0) {
           setNeedsSeed(true);
@@ -547,6 +555,17 @@ function App() {
     setSyncing(true);
     try { await deleteRecord("grants", id); setGrants(prev => prev.filter(g => g.id !== id)); showToast("Deleted", "error"); } catch {}
     setSyncing(false);
+  };
+
+  const saveSalaryAllocation = async (personId, allocation) => {
+    try {
+      const record = { id: personId, ...allocation };
+      await saveRecord("salary", record);
+      setSalaryAllocations(prev => ({ ...prev, [personId]: allocation }));
+    } catch(e) {
+      console.error("Salary save error:", e);
+      showToast("Failed to save: " + e.message, "error");
+    }
   };
 
   const saveOnboarding = async (personId, checklist, training, notes) => {
@@ -747,7 +766,7 @@ function App() {
         {tab === "onboarding" && <OnboardingView people={people} checklist={onboardingChecklist} setChecklist={setOnboardingChecklist} trainingWants={onboardingTraining} setTrainingWants={setOnboardingTraining} trainingNotes={onboardingNotes} setTrainingNotes={setOnboardingNotes} onSave={saveOnboarding} />}
         {tab === "management" && (
           mgmtUnlocked
-            ? <ManagementView projects={projects} people={people} deliverables={deliverables} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
+            ? <ManagementView projects={projects} people={people} deliverables={deliverables} salaryAllocations={salaryAllocations} onSaveSalary={saveSalaryAllocation} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
             : <PinGate onUnlock={() => setMgmtUnlocked(true)} />
         )}
       </div>
@@ -2678,7 +2697,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
 }
 
 
-function ManagementView({ projects, people, deliverables, onLock, onEditProject }) {
+function ManagementView({ projects, people, deliverables, salaryAllocations: salaryAllocsProp, onSaveSalary, onLock, onEditProject }) {
   const [mgmtTab, setMgmtTab] = useState("health");
   const today = new Date();
 
@@ -2735,7 +2754,10 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
     .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
   const [exporting, setExporting] = useState(false);
-  const [salaryAllocations, setSalaryAllocations] = useState({});
+  const [salarySearch, setSalarySearch] = useState("");
+  const [salarySort, setSalarySort] = useState("role");
+  const [salaryRoleFilter, setSalaryRoleFilter] = useState("All");
+  const salaryAllocations = salaryAllocsProp || {};
   const [editingSalary, setEditingSalary] = useState(null);
   const [emailModal, setEmailModal] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
@@ -3165,10 +3187,26 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
 
         return (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
                 <h2 style={{ margin: "0 0 4px", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "#0f1f3d" }}>Salary & FTE Allocations</h2>
-                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Track which projects fund each person's salary and by how much FTE. Total lab: {totalLabFTE.toFixed(1)} FTE across {people.length} people.</p>
+                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total lab: {totalLabFTE.toFixed(1)} FTE across {people.length} people.</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+              <input value={salarySearch} onChange={e => setSalarySearch(e.target.value)} placeholder="Search by name…"
+                style={{ flex: 1, minWidth: 180, padding: "9px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 13, outline: "none", background: "#fff" }} />
+              <select value={salaryRoleFilter} onChange={e => setSalaryRoleFilter(e.target.value)}
+                style={{ padding: "9px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 13, outline: "none", background: "#fff", cursor: "pointer" }}>
+                <option value="All">All Roles</option>
+                {["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Administrative Assistant","Research Assistant","PhD Candidate","Masters Student"].map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <div style={{ display: "flex", background: "#fff", border: "1.5px solid #dde1e9", borderRadius: 3, overflow: "hidden" }}>
+                {[{id:"role",label:"By Role"},{id:"alpha",label:"A–Z"},{id:"fte",label:"By FTE"}].map(s => (
+                  <button key={s.id} onClick={() => setSalarySort(s.id)} style={{ padding: "9px 14px", border: "none", background: salarySort===s.id ? "#0f1f3d" : "#fff", color: salarySort===s.id ? "#fff" : "#6b7280", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{s.label}</button>
+                ))}
               </div>
             </div>
 
@@ -3179,11 +3217,18 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
                 ))}
               </div>
 
-              {[...people].sort((a, b) => {
-                const LEADERSHIP_ORDER = ["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Administrative Assistant","Research Assistant","PhD Candidate","Masters Student"];
+              {[...people].filter(person => {
+                const role = Array.isArray(person.roles) ? person.roles[0] : (person.role||"");
+                const matchSearch = !salarySearch || person.name.toLowerCase().includes(salarySearch.toLowerCase());
+                const matchRole = salaryRoleFilter === "All" || role === salaryRoleFilter;
+                return matchSearch && matchRole;
+              }).sort((a, b) => {
+                const LEADERSHIP_ORDER_SAL = ["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Administrative Assistant","Research Assistant","PhD Candidate","Masters Student"];
                 const ra = Array.isArray(a.roles) ? a.roles[0] : (a.role||"");
                 const rb = Array.isArray(b.roles) ? b.roles[0] : (b.role||"");
-                return (LEADERSHIP_ORDER.indexOf(ra)+1||99) - (LEADERSHIP_ORDER.indexOf(rb)+1||99) || a.name.localeCompare(b.name);
+                if (salarySort === "alpha") return a.name.localeCompare(b.name);
+                if (salarySort === "fte") return (parseFloat(b.availability)||0) - (parseFloat(a.availability)||0);
+                return (LEADERSHIP_ORDER_SAL.indexOf(ra)+1||99) - (LEADERSHIP_ORDER_SAL.indexOf(rb)+1||99) || a.name.localeCompare(b.name);
               }).map((person, idx) => {
                 const role = Array.isArray(person.roles) ? person.roles[0] : (person.role||"");
                 const rc = ROLE_COLORS[role] || "#6b7280";
