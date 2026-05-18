@@ -2553,53 +2553,124 @@ function PinGate({ onUnlock }) {
 // ── Management View ───────────────────────────────────────────────────────────
 function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
   const [sources, setSources] = useState(allocation.sources || []);
+  const [contracts, setContracts] = useState(allocation.contracts || []);
   const [notes, setNotes] = useState(allocation.notes || "");
+  const [activeTab, setActiveTab] = useState("current");
 
-  const addSource = () => setSources(s => [...s, { projectId: "", source: "", fte: 0, notes: "" }]);
+  const addSource = () => setSources(s => [...s, { projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
   const updateSource = (i, field, val) => setSources(s => s.map((src, idx) => idx === i ? { ...src, [field]: val } : src));
   const removeSource = (i) => setSources(s => s.filter((_, idx) => idx !== i));
+
+  const addContract = () => setContracts(c => [...c, { id: "c"+Date.now(), projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
+  const updateContract = (i, field, val) => setContracts(c => c.map((con, idx) => idx === i ? { ...con, [field]: val } : con));
+  const removeContract = (i) => setContracts(c => c.filter((_, idx) => idx !== i));
+
   const totalFTE = sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
   const available = parseFloat(person.availability) || 0;
+  const today = new Date();
 
-  return (
-    <div style={{ background: "#f8f9fb", borderRadius: 3, padding: 14, border: "1px solid #e2e5ea" }}>
-      {sources.map((src, i) => (
-        <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-          <select value={src.projectId} onChange={e => updateSource(i, "projectId", e.target.value)}
-            style={{ flex: 2, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: "#fff" }}>
+  const expiringWarning = sources.filter(src => {
+    if (!src.endDate) return false;
+    const diff = (new Date(src.endDate) - today) / 86400000;
+    return diff >= 0 && diff <= 60;
+  });
+  const expiredSources = sources.filter(src => src.endDate && new Date(src.endDate) < today);
+
+  const SourceRow = ({ src, i, isContract }) => {
+    const update = isContract ? (f, v) => updateContract(i, f, v) : (f, v) => updateSource(i, f, v);
+    const remove = isContract ? () => removeContract(i) : () => removeSource(i);
+    const endDiff = src.endDate ? Math.round((new Date(src.endDate) - today) / 86400000) : null;
+    const isExpired = endDiff !== null && endDiff < 0;
+    const isExpiring = endDiff !== null && endDiff >= 0 && endDiff <= 60;
+    return (
+      <div style={{ background: isExpired ? "#fef2f2" : "#fff", borderRadius: 3, border: `1px solid ${isExpired ? "#fca5a5" : isExpiring ? "#fde68a" : "#e2e5ea"}`, padding: "12px", marginBottom: 10 }}>
+        {(isExpired || isExpiring) && (
+          <div style={{ fontSize: 11, fontWeight: 700, color: isExpired ? "#dc2626" : "#d97706", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+            <Icon name="alert" size={12} color={isExpired ? "#dc2626" : "#d97706"} />
+            {isExpired ? `Contract ended ${Math.abs(endDiff)}d ago` : `Expires in ${endDiff}d`}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <select value={src.projectId} onChange={e => update("projectId", e.target.value)}
+            style={{ flex: 2, minWidth: 160, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: "#fff" }}>
             <option value="">— Select project or source —</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name?.slice(0,50)}</option>)}
             <option value="__university">University base salary</option>
             <option value="__scholarship">Scholarship</option>
             <option value="__fellowship">Fellowship</option>
-            <option value="__other">Other (see source field)</option>
+            <option value="__other">Other</option>
           </select>
-          <input value={src.source} onChange={e => updateSource(i, "source", e.target.value)} placeholder="Source label (optional)"
-            style={{ flex: 1.5, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          <input value={src.source} onChange={e => update("source", e.target.value)} placeholder="Label / contract ref"
+            style={{ flex: 1.5, minWidth: 120, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <input type="number" min="0" max="5" step="0.1" value={src.fte} onChange={e => updateSource(i, "fte", e.target.value)}
-              style={{ width: 70, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", textAlign: "center" }} />
-            <span style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>FTE</span>
+            <input type="number" min="0" max="5" step="0.1" value={src.fte} onChange={e => update("fte", e.target.value)}
+              style={{ width: 65, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", textAlign: "center" }} />
+            <span style={{ fontSize: 11, color: "#9ca3af" }}>FTE</span>
           </div>
-          <input value={src.notes} onChange={e => updateSource(i, "notes", e.target.value)} placeholder="Notes…"
-            style={{ flex: 1, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
-          <button onClick={() => removeSource(i)} style={{ padding: "7px 8px", border: "1px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer" }}>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>Start</span>
+            <input type="date" value={src.startDate||""} onChange={e => update("startDate", e.target.value)}
+              style={{ padding: "6px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>End</span>
+            <input type="date" value={src.endDate||""} onChange={e => update("endDate", e.target.value)}
+              style={{ padding: "6px 10px", border: `1.5px solid ${isExpired ? "#fca5a5" : isExpiring ? "#fde68a" : "#dde1e9"}`, borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: isExpired ? "#fef2f2" : isExpiring ? "#fef9c3" : "#fff" }} />
+          </div>
+          <input value={src.notes||""} onChange={e => update("notes", e.target.value)} placeholder="Notes…" style={{ flex: 1, minWidth: 120, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          <button onClick={remove} style={{ padding: "7px 8px", border: "1px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer", flexShrink: 0 }}>
             <Icon name="trash" size={13} color="#dc2626" />
           </button>
         </div>
-      ))}
-      <button onClick={addSource} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
-        <Icon name="plus" size={13} color="#6b7280" /> Add source
-      </button>
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: totalFTE > available + 0.01 ? "#dc2626" : totalFTE < available - 0.01 ? "#d97706" : "#16a34a", marginBottom: 6 }}>
-          {totalFTE.toFixed(1)} / {available} FTE allocated {totalFTE > available + 0.01 ? "⚠ Over budget!" : totalFTE < available - 0.01 ? `⚠ ${(available-totalFTE).toFixed(1)} FTE unaccounted` : "✓ Fully allocated"}
-        </div>
-        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="General notes (e.g. salary review due, contract end date…)"
-          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
       </div>
+    );
+  };
+
+  return (
+    <div style={{ background: "#f8f9fb", borderRadius: 3, padding: 14, border: "1px solid #e2e5ea" }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 12, background: "#fff", border: "1.5px solid #dde1e9", borderRadius: 3, overflow: "hidden", width: "fit-content" }}>
+        {[{ id: "current", label: "Current Allocations" }, { id: "history", label: "Contract History" }].map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ padding: "7px 16px", border: "none", background: activeTab === t.id ? "#0f1f3d" : "#fff", color: activeTab === t.id ? "#fff" : "#6b7280", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase" }}>{t.label}</button>
+        ))}
+      </div>
+
+      {activeTab === "current" && (
+        <div>
+          {expiringWarning.length > 0 && (
+            <div style={{ padding: "8px 12px", background: "#fef9c3", border: "1px solid #fde68a", borderRadius: 3, marginBottom: 10, fontSize: 12, fontWeight: 600, color: "#92400e", display: "flex", alignItems: "center", gap: 6 }}>
+              <Icon name="alert" size={13} color="#d97706" />
+              {expiringWarning.length} contract{expiringWarning.length > 1 ? "s" : ""} expiring within 60 days
+            </div>
+          )}
+          {sources.map((src, i) => <SourceRow key={i} src={src} i={i} isContract={false} />)}
+          <button onClick={addSource} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
+            <Icon name="plus" size={13} color="#6b7280" /> Add current allocation
+          </button>
+          <div style={{ fontSize: 12, fontWeight: 700, color: totalFTE > available + 0.01 ? "#dc2626" : totalFTE < available - 0.01 ? "#d97706" : "#16a34a", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="budget" size={13} color={totalFTE > available + 0.01 ? "#dc2626" : totalFTE < available - 0.01 ? "#d97706" : "#16a34a"} />
+            {totalFTE.toFixed(1)} / {available} FTE allocated {totalFTE > available + 0.01 ? "⚠ Over!" : totalFTE < available - 0.01 ? `— ${(available-totalFTE).toFixed(1)} FTE gap` : "✓ Fully covered"}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "history" && (
+        <div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10 }}>Log all past and upcoming contracts — useful for tracking funding continuity over time.</div>
+          {contracts.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", fontStyle: "italic", marginBottom: 10 }}>No contract history recorded yet.</div>}
+          {contracts.map((con, i) => <SourceRow key={con.id||i} src={con} i={i} isContract={true} />)}
+          <button onClick={addContract} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
+            <Icon name="plus" size={13} color="#6b7280" /> Add contract
+          </button>
+        </div>
+      )}
+
+      <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="General notes (salary review due, visa status, etc.)"
+        style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", marginBottom: 10 }} />
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => onSave({ sources, notes })} style={{ padding: "7px 16px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Save</button>
+        <button onClick={() => onSave({ sources, contracts, notes })} style={{ padding: "7px 16px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Save</button>
         <button onClick={onCancel} style={{ padding: "7px 14px", background: "#fff", color: "#6b7280", border: "1.5px solid #dde1e9", borderRadius: 2, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Cancel</button>
       </div>
     </div>
@@ -3116,7 +3187,7 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
               }).map((person, idx) => {
                 const role = Array.isArray(person.roles) ? person.roles[0] : (person.role||"");
                 const rc = ROLE_COLORS[role] || "#6b7280";
-                const alloc = salaryAllocations[person.id] || { sources: [], notes: "" };
+                const alloc = salaryAllocations[person.id] || { sources: [], contracts: [], notes: "" };
                 const totalAllocFTE = alloc.sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
                 const isOver = totalAllocFTE > (parseFloat(person.availability)||0) + 0.01;
                 const isUnder = totalAllocFTE < (parseFloat(person.availability)||0) - 0.01;
@@ -3152,19 +3223,32 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
                           <span style={{ fontSize: 12, color: "#b0b8c4", fontStyle: "italic" }}>No allocations recorded</span>
                         )}
                         {!isEditing && alloc.sources.length > 0 && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {alloc.sources.map((src, si) => {
                               const proj = projects.find(p => p.id === src.projectId);
+                              const endDiff = src.endDate ? Math.round((new Date(src.endDate) - new Date()) / 86400000) : null;
+                              const isExpired = endDiff !== null && endDiff < 0;
+                              const isExpiring = endDiff !== null && endDiff >= 0 && endDiff <= 60;
                               return (
-                                <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <div style={{ width: 38, height: 22, background: "#e85d2718", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <span style={{ fontSize: 11, fontWeight: 800, color: "#e85d27" }}>{src.fte} FTE</span>
+                                <div key={si} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: isExpired ? "#fef2f2" : isExpiring ? "#fef9c3" : "#f8f9fb", borderRadius: 3, border: `1px solid ${isExpired ? "#fca5a5" : isExpiring ? "#fde68a" : "#e8eaed"}` }}>
+                                  <div style={{ background: isExpired ? "#fca5a5" : "#e85d2718", borderRadius: 2, padding: "2px 7px", flexShrink: 0 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 800, color: isExpired ? "#dc2626" : "#e85d27" }}>{src.fte} FTE</span>
                                   </div>
-                                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>{src.source || (proj?.name?.slice(0,40)) || "—"}</span>
-                                  {src.notes && <span style={{ fontSize: 11, color: "#9ca3af" }}>· {src.notes}</span>}
+                                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600, flex: 1 }}>{src.source || (proj?.name?.slice(0,40)) || "—"}</span>
+                                  {src.endDate && (
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: isExpired ? "#dc2626" : isExpiring ? "#d97706" : "#9ca3af", whiteSpace: "nowrap" }}>
+                                      {isExpired ? `Ended ${Math.abs(endDiff)}d ago` : isExpiring ? `Expires ${endDiff}d` : `Until ${new Date(src.endDate).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"})}`}
+                                    </span>
+                                  )}
                                 </div>
                               );
                             })}
+                            {(alloc.contracts||[]).length > 0 && (
+                              <div style={{ fontSize: 11, color: "#6b7280", display: "flex", alignItems: "center", gap: 5 }}>
+                                <Icon name="calendar" size={11} color="#9ca3af" />
+                                {alloc.contracts.length} contract{alloc.contracts.length !== 1 ? "s" : ""} in history
+                              </div>
+                            )}
                           </div>
                         )}
                         {isEditing && (
@@ -3187,11 +3271,23 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
                       </div>
 
                       {/* Edit */}
-                      {!isEditing && (
-                        <button onClick={() => setEditingSalary(person.id)} style={{ padding: "5px 10px", border: "1px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                          <Icon name="edit" size={12} color="#6b7280" />Edit
-                        </button>
-                      )}
+                      {!isEditing && (() => {
+                        const expiring = (alloc.sources||[]).filter(src => {
+                          if (!src.endDate) return false;
+                          const diff = (new Date(src.endDate) - new Date()) / 86400000;
+                          return diff >= 0 && diff <= 60;
+                        });
+                        const expired = (alloc.sources||[]).filter(src => src.endDate && new Date(src.endDate) < new Date());
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
+                            {expired.length > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", background: "#fef2f2", padding: "2px 7px", borderRadius: 99 }}>⚠ {expired.length} expired</span>}
+                            {expiring.length > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#d97706", background: "#fef9c3", padding: "2px 7px", borderRadius: 99 }}>⚠ {expiring.length} expiring</span>}
+                            <button onClick={() => setEditingSalary(person.id)} style={{ padding: "5px 10px", border: "1px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                              <Icon name="edit" size={12} color="#6b7280" />Edit
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
@@ -3459,195 +3555,239 @@ const TRAINING_TOPICS = [
 ];
 
 function OnboardingView({ people, checklist, setChecklist, trainingWants, setTrainingWants, trainingNotes, setTrainingNotes, onSave }) {
-  const [selectedPerson, setSelectedPerson] = useState("");
-  const [activeSection, setActiveSection] = useState("checklist");
+  const [activeSection, setActiveSection] = useState("welcome");
+  const [editingNote, setEditingNote] = useState(null); // { sectionId, noteId } 
+  const [newNoteText, setNewNoteText] = useState("");
+  const [newNoteAuthor, setNewNoteAuthor] = useState(people[0]?.name || "");
+  const [sectionNotes, setSectionNotes] = useState(trainingNotes || {}); // reuse trainingNotes field for wiki notes
+  const [trainingSelections, setTrainingSelections] = useState(trainingWants || {});
+  const [showTraining, setShowTraining] = useState(false);
 
-  const person = people.find(p => p.id === selectedPerson);
-  const personChecklist = checklist[selectedPerson] || {};
-  const personTraining = trainingWants[selectedPerson] || [];
-  const personNote = trainingNotes[selectedPerson] || "";
+  // Sync when props update
+  React.useEffect(() => { setSectionNotes(trainingNotes || {}); }, [trainingNotes]);
+  React.useEffect(() => { setTrainingSelections(trainingWants || {}); }, [trainingWants]);
+  React.useEffect(() => { if (people.length > 0 && !newNoteAuthor) setNewNoteAuthor(people[0].name); }, [people]);
 
-  const totalItems = ONBOARDING_SECTIONS.reduce((s, sec) => s + sec.items.length, 0);
-  const completedItems = Object.values(personChecklist).filter(Boolean).length;
+  const SECTIONS = [
+    {
+      id: "welcome", icon: "star", label: "Welcome & Values",
+      content: [
+        { type: "heading", text: "Welcome to FLARE!" },
+        { type: "text", text: "We're a collaborative, interdisciplinary team committed to advancing fire science and environmental decision-making through rigorous, impactful research. Our mission is to generate knowledge that improves the resilience of people, ecosystems, and landscapes to fire — while fostering a research culture that is inclusive, supportive, and driven by shared purpose." },
+        { type: "heading", text: "Our Core Values" },
+        { type: "values", items: [
+          { title: "Inclusion and Respect", text: "We are committed to creating a workplace where everyone feels welcome, respected, and safe. We actively value diversity in all its forms." },
+          { title: "Kindness and Collegiality", text: "We treat one another with empathy, generosity, and professional respect. We support each other's successes." },
+          { title: "Mentorship and Growth", text: "We are a learning-focused team. Senior members are committed to mentoring junior researchers, and everyone is encouraged to be both a mentor and a mentee." },
+          { title: "Integrity and Accountability", text: "We hold ourselves to high standards of scientific and professional integrity. We are transparent in our methods and realistic in our commitments." },
+          { title: "Curiosity and Excellence", text: "We pursue rigorous, world-class research grounded in curiosity, critical thinking, and meaningful application." },
+          { title: "Shared Success", text: "We celebrate one another's achievements and recognise the work that happens behind the scenes — coding, admin, mentorship, peer review." },
+        ]},
+        { type: "heading", text: "Expectations" },
+        { type: "list", items: [
+          "Treat all members with respect regardless of background, identity, or experience.",
+          "Bullying and harassment have no place in our team — call it out or report it to senior members or HR.",
+          "Try to be around during the work week — respond to emails and show up for meetings on time.",
+          "Work-life balance is important. No expectations for working excessive hours.",
+          "Follow through on commitments, and ask for help if overwhelmed.",
+          "Take an interest in the research of the team and provide constructive feedback.",
+          "Always represent the team favourably in professional and social settings.",
+        ]},
+        { type: "heading", text: "What to expect from leadership" },
+        { type: "list", items: [
+          "Support to become an excellent researcher.",
+          "Honest, constructive feedback on your work.",
+          "A supportive, safe, and enjoyable work environment.",
+          "Honest advice on your professional decisions.",
+          "Working with you to set ambitious but reasonable research goals.",
+        ]},
+      ]
+    },
+    {
+      id: "it", icon: "info", label: "Access & IT Setup",
+      content: [
+        { type: "heading", text: "Team Website" },
+        { type: "text", text: "Visit our team website: https://www.flarewildfire.com/ — Contact Bee Pickering (bee.pickering@unimelb.edu.au) to get added to the website." },
+        { type: "heading", text: "Shared Drives" },
+        { type: "subheading", text: "🔥 Pyromancer Drive (P:)" },
+        { type: "code", text: "Windows: File Explorer → Right-click This PC → Map network drive\nDrive letter: P:\nFolder: \\\\10.101.94.22\\Pyromancer\nTick: Reconnect at sign-in\nUsername: TOLHURST\\administrator\nPassword: zings8-feeble" },
+        { type: "subheading", text: "🌿 Bushfire Drive (S:)" },
+        { type: "code", text: "Windows: File Explorer → Right-click This PC → Map network drive\nDrive letter: S:\nFolder: \\\\om-file\\220\\Shares\\SEFS Research data\\Restricted\nTick: Reconnect at sign-in\n(Should not require login on University-managed machines)" },
+        { type: "heading", text: "ServiceNow Portal" },
+        { type: "text", text: "The University's central platform for IT support, reimbursements, risk assessments and more: https://serviceconnect.unimelb.edu.au" },
+        { type: "heading", text: "Multi-factor Authentication" },
+        { type: "text", text: "Set up MFA for your University account. Contact IT if you need help." },
+      ]
+    },
+    {
+      id: "data", icon: "deliverables", label: "Data & File Management",
+      content: [
+        { type: "heading", text: "Data Management Plan" },
+        { type: "text", text: "All members are expected to follow our Data Management Plan (DMP), which outlines file naming conventions, folder structure, backup procedures, and metadata requirements. Access the full DMP here: [Insert link to DMP document]." },
+        { type: "heading", text: "Folder Structure & Naming" },
+        { type: "text", text: "To be completed — add your team's conventions here." },
+        { type: "heading", text: "Data Sharing & Backup" },
+        { type: "text", text: "To be completed — add your data sharing policies and backup procedures here." },
+      ]
+    },
+    {
+      id: "frost", icon: "fire", label: "FROST & Modelling",
+      content: [
+        { type: "heading", text: "FROST" },
+        { type: "text", text: "FROST is our primary fire modelling tool. A full section explaining FROST setup, use, and workflows is being developed. Contact your supervisor for an introduction session." },
+        { type: "text", text: "Simulation register: [Insert link — a register of previously run simulations for reference]." },
+      ]
+    },
+    {
+      id: "projects", icon: "projects", label: "Project & Time Management",
+      content: [
+        { type: "heading", text: "Meeting Structures" },
+        { type: "list", items: [
+          "Weekly team meetings — each year, every team member presents at least once.",
+          "Discuss meeting frequency with your direct supervisor.",
+        ]},
+        { type: "heading", text: "Project Tracking" },
+        { type: "text", text: "We use this FLARE Research Tracker to manage projects, deliverables, outputs, and team workload. Your supervisor will walk you through how to use it. Key things to set up: your profile on the People tab, and your deliverables linked to your project." },
+      ]
+    },
+    {
+      id: "admin", icon: "budget", label: "Administration",
+      content: [
+        { type: "heading", text: "Reimbursements & Invoicing" },
+        { type: "text", text: "Submit reimbursement claims and invoices through the ServiceNow portal: https://serviceconnect.unimelb.edu.au — guides are available there." },
+        { type: "heading", text: "Risk Assessments" },
+        { type: "text", text: "Required for fieldwork, conferences, and certain lab activities. Complete via ServiceNow before travel or fieldwork begins." },
+        { type: "heading", text: "Leave" },
+        { type: "text", text: "Submit leave requests through the University HR system. Let your supervisor and Tori know in advance. Update your status in the People tab of the Research Tracker so the team knows you're away." },
+        { type: "heading", text: "Publications" },
+        { type: "text", text: "Discuss authorship and publication plans with your supervisor early. The Research Tracker Outputs tab is used to log and track all publications." },
+      ]
+    },
+  ];
 
-  const toggleItem = (itemId) => {
-    const newPersonChecklist = { ...personChecklist, [itemId]: !personChecklist[itemId] };
-    const newChecklist = { ...checklist, [selectedPerson]: newPersonChecklist };
-    setChecklist(newChecklist);
-    onSave(selectedPerson, newPersonChecklist, personTraining, personNote);
+  const currentSection = SECTIONS.find(s => s.id === activeSection) || SECTIONS[0];
+  const sectionNotesForCurrent = (sectionNotes[activeSection] || []);
+
+  const addNote = () => {
+    if (!newNoteText.trim()) return;
+    const note = { id: "n" + Date.now(), author: newNoteAuthor, text: newNoteText.trim(), timestamp: new Date().toISOString() };
+    const updated = { ...sectionNotes, [activeSection]: [...sectionNotesForCurrent, note] };
+    setSectionNotes(updated);
+    setNewNoteText("");
+    // Save using onSave - store as trainingNotes (reused field)
+    setTrainingNotes(updated);
+    onSave("wiki_notes", {}, [], JSON.stringify(updated));
   };
 
-  const toggleTraining = (topic) => {
-    const newTraining = personTraining.includes(topic)
-      ? personTraining.filter(t => t !== topic)
-      : [...personTraining, topic];
-    setTrainingWants(prev => ({ ...prev, [selectedPerson]: newTraining }));
-    onSave(selectedPerson, personChecklist, newTraining, personNote);
+  const deleteNote = (noteId) => {
+    const updated = { ...sectionNotes, [activeSection]: sectionNotesForCurrent.filter(n => n.id !== noteId) };
+    setSectionNotes(updated);
+    setTrainingNotes(updated);
+    onSave("wiki_notes", {}, [], JSON.stringify(updated));
   };
 
-  // Summary view - who has what outstanding
-  const SummaryView = () => (
-    <div>
-      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 16 }}>Team Onboarding Overview</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-        {people.map(p => {
-          const pc = checklist[p.id] || {};
-          const done = Object.values(pc).filter(Boolean).length;
-          const pct = Math.round((done / totalItems) * 100);
-          const wants = trainingWants[p.id] || [];
-          const role = Array.isArray(p.roles) ? p.roles[0] : (p.role||"");
-          const rc = ROLE_COLORS[role] || "#6b7280";
-          return (
-            <div key={p.id} onClick={() => setSelectedPerson(p.id)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderTop: `3px solid ${rc}` }}
-              onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)"}
-              onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.04)"}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: rc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15, color: rc, overflow: "hidden", border: `2px solid ${rc}33` }}>
-                  {p.photoUrl ? <img src={p.photoUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : p.name.charAt(0)}
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d" }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>{role}</div>
-                </div>
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
-                  <span>Onboarding</span><span style={{ fontWeight: 700, color: pct === 100 ? "#16a34a" : "#e85d27" }}>{pct}%</span>
-                </div>
-                <ProgressBar value={pct} color={pct === 100 ? "#16a34a" : "#e85d27"} />
-              </div>
-              {wants.length > 0 && (
-                <div style={{ fontSize: 11, color: "#7c3aed", background: "#f5f3ff", padding: "4px 8px", borderRadius: 2, fontWeight: 600 }}>
-                  {wants.length} training topic{wants.length !== 1 ? "s" : ""} requested
-                </div>
-              )}
-              {done === 0 && <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>Not started</div>}
-            </div>
-          );
-        })}
+  const renderContent = (items) => items.map((item, i) => {
+    if (item.type === "heading") return <h3 key={i} style={{ margin: "20px 0 8px", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, color: "#0f1f3d", borderBottom: "2px solid #f0f2f5", paddingBottom: 6 }}>{item.text}</h3>;
+    if (item.type === "subheading") return <h4 key={i} style={{ margin: "14px 0 6px", fontSize: 15, fontWeight: 700, color: "#374151" }}>{item.text}</h4>;
+    if (item.type === "text") return <p key={i} style={{ margin: "0 0 12px", fontSize: 14, color: "#374151", lineHeight: 1.75 }}>{item.text}</p>;
+    if (item.type === "code") return <pre key={i} style={{ background: "#f0f2f6", border: "1px solid #e2e5ea", borderRadius: 3, padding: "12px 16px", fontSize: 12, fontFamily: "monospace", color: "#374151", lineHeight: 1.7, overflowX: "auto", margin: "0 0 12px" }}>{item.text}</pre>;
+    if (item.type === "list") return <ul key={i} style={{ margin: "0 0 12px", paddingLeft: 20 }}>{item.items.map((li, j) => <li key={j} style={{ fontSize: 14, color: "#374151", lineHeight: 1.75, marginBottom: 4 }}>{li}</li>)}</ul>;
+    if (item.type === "values") return (
+      <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, margin: "0 0 16px" }}>
+        {item.items.map((v, j) => (
+          <div key={j} style={{ background: "#f8f9fb", borderRadius: 3, padding: "14px 16px", borderLeft: "3px solid #e85d27" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d", marginBottom: 4 }}>{v.title}</div>
+            <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.6 }}>{v.text}</div>
+          </div>
+        ))}
       </div>
-    </div>
-  );
+    );
+    return null;
+  });
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Onboarding & Training</h1>
-          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14 }}>Track onboarding progress and training interests for each team member</p>
-        </div>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ margin: "0 0 4px", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Onboarding Guide</h1>
+        <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>FLARE Wildfire Research Group · July 2025, Version 1.0 · Team members can add notes and tips to any section</p>
       </div>
 
-      {/* Person selector */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 24, alignItems: "center" }}>
-        <select value={selectedPerson} onChange={e => setSelectedPerson(e.target.value)}
-          style={{ padding: "10px 16px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", background: "#fff", cursor: "pointer", fontWeight: 500, minWidth: 220 }}>
-          <option value="">— Team overview —</option>
-          {[...people].sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        {selectedPerson && (
-          <div style={{ display: "flex", background: "#fff", border: "1.5px solid #dde1e9", borderRadius: 3, overflow: "hidden" }}>
-            {[{ id: "checklist", label: "Checklist" }, { id: "training", label: "Training Interests" }].map(s => (
-              <button key={s.id} onClick={() => setActiveSection(s.id)} style={{ padding: "10px 18px", border: "none", background: activeSection === s.id ? "#0f1f3d" : "#fff", color: activeSection === s.id ? "#fff" : "#6b7280", fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5 }}>{s.label}</button>
+      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 24, alignItems: "flex-start" }}>
+        {/* Sidebar nav */}
+        <div style={{ position: "sticky", top: 88 }}>
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
+            {SECTIONS.map(s => (
+              <button key={s.id} onClick={() => setActiveSection(s.id)} style={{ width: "100%", padding: "12px 16px", border: "none", borderLeft: activeSection === s.id ? "3px solid #e85d27" : "3px solid transparent", background: activeSection === s.id ? "#fff7f5" : "#fff", color: activeSection === s.id ? "#e85d27" : "#374151", fontSize: 13, fontWeight: activeSection === s.id ? 700 : 500, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid #f0f2f5", transition: "all 0.15s" }}>
+                <Icon name={s.icon} size={14} color={activeSection === s.id ? "#e85d27" : "#9ca3af"} />
+                {s.label}
+                {(sectionNotes[s.id]||[]).length > 0 && <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "#f5f3ff", padding: "1px 6px", borderRadius: 99 }}>{(sectionNotes[s.id]||[]).length}</span>}
+              </button>
             ))}
           </div>
-        )}
-        {selectedPerson && <button onClick={() => setSelectedPerson("")} style={{ padding: "9px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280" }}>← Overview</button>}
-      </div>
-
-      {/* Overview */}
-      {!selectedPerson && (people.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 20px", color: "#9ca3af", background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea" }}>
-          <Icon name="people" size={40} color="#e2e5ea" style={{ margin: "0 auto 12px", display: "block" }} />
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>People not loaded yet</div>
-          <div style={{ fontSize: 13 }}>The tracker is still connecting to the database. If this persists, check your Supabase connection.</div>
         </div>
-      ) : <SummaryView />)}
 
-      {/* Person checklist */}
-      {selectedPerson && activeSection === "checklist" && (
+        {/* Main content */}
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-            {person?.photoUrl && <img src={person.photoUrl} alt={person.name} style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", border: "2px solid #e2e5ea" }} />}
-            <div>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, textTransform: "uppercase", color: "#0f1f3d" }}>{person?.name}</div>
-              <div style={{ fontSize: 13, color: "#6b7280" }}>{completedItems} of {totalItems} items complete · {Math.round((completedItems/totalItems)*100)}%</div>
+          {/* Section content */}
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "24px 28px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <Icon name={currentSection.icon} size={20} color="#e85d27" />
+              <h2 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "#0f1f3d" }}>{currentSection.label}</h2>
             </div>
-            <div style={{ marginLeft: "auto", width: 200 }}>
-              <ProgressBar value={Math.round((completedItems/totalItems)*100)} color={completedItems === totalItems ? "#16a34a" : "#e85d27"} />
-            </div>
+            {renderContent(currentSection.content)}
           </div>
 
-          {ONBOARDING_SECTIONS.map(section => (
-            <div key={section.id} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", marginBottom: 14, overflow: "hidden" }}>
-              <div style={{ padding: "12px 18px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", gap: 8 }}>
-                <Icon name={section.icon} size={15} color="#0f1f3d" />
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>{section.label}</span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "#9ca3af" }}>
-                  {section.items.filter(item => personChecklist[item.id]).length}/{section.items.length}
-                </span>
-              </div>
-              <div style={{ padding: "8px 0" }}>
-                {section.items.map(item => {
-                  const done = personChecklist[item.id];
-                  return (
-                    <div key={item.id} onClick={() => toggleItem(item.id)}
-                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", cursor: "pointer", borderBottom: "1px solid #f5f5f5", transition: "background 0.1s" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"}
-                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <div style={{ width: 22, height: 22, borderRadius: 3, border: `2px solid ${done ? "#16a34a" : "#dde1e9"}`, background: done ? "#16a34a" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
-                        {done && <Icon name="check" size={13} color="#fff" />}
-                      </div>
-                      <span style={{ fontSize: 14, color: done ? "#9ca3af" : "#374151", textDecoration: done ? "line-through" : "none", flex: 1 }}>{item.text}</span>
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Team notes for this section */}
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
+            <div style={{ padding: "14px 20px", background: "#f5f3ff", borderBottom: "2px solid #e9d5ff", display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="people" size={15} color="#7c3aed" />
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#7c3aed" }}>Team Notes & Tips</span>
+              <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 4 }}>— add your own notes, links, or tips for this section</span>
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Training interests */}
-      {selectedPerson && activeSection === "training" && (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-            {person?.photoUrl && <img src={person.photoUrl} alt={person.name} style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", border: "2px solid #e2e5ea" }} />}
-            <div>
-              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, textTransform: "uppercase", color: "#0f1f3d" }}>{person?.name}</div>
-              <div style={{ fontSize: 13, color: "#6b7280" }}>{personTraining.length} training topic{personTraining.length !== 1 ? "s" : ""} flagged</div>
-            </div>
-          </div>
-
-          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px 18px", marginBottom: 16 }}>
-            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 6 }}>What would you like to learn or get trained in?</div>
-            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 14 }}>Tick everything you'd like to be covered, trained in, or want to learn more about. This helps the team plan training sessions.</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
-              {TRAINING_TOPICS.map(topic => {
-                const selected = personTraining.includes(topic);
-                return (
-                  <div key={topic} onClick={() => toggleTraining(topic)}
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 3, border: `1.5px solid ${selected ? "#7c3aed" : "#e5e7eb"}`, background: selected ? "#f5f3ff" : "#fff", cursor: "pointer", transition: "all 0.15s" }}>
-                    <div style={{ width: 20, height: 20, borderRadius: 3, border: `2px solid ${selected ? "#7c3aed" : "#dde1e9"}`, background: selected ? "#7c3aed" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
-                      {selected && <Icon name="check" size={12} color="#fff" />}
-                    </div>
-                    <span style={{ fontSize: 13, color: selected ? "#7c3aed" : "#374151", fontWeight: selected ? 700 : 400 }}>{topic}</span>
+            {/* Existing notes */}
+            {sectionNotesForCurrent.map(note => {
+              const author = people.find(p => p.name === note.author);
+              const rc = ROLE_COLORS[Array.isArray(author?.roles) ? author.roles[0] : (author?.role||"")] || "#6b7280";
+              return (
+                <div key={note.id} style={{ padding: "14px 20px", borderBottom: "1px solid #f5f5f5", display: "flex", gap: 12 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: rc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: rc, flexShrink: 0, overflow: "hidden", border: `2px solid ${rc}30` }}>
+                    {author?.photoUrl ? <img src={author.photoUrl} alt={note.author} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (note.author?.charAt(0)||"?")}
                   </div>
-                );
-              })}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d" }}>{note.author}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>{new Date(note.timestamp).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}</span>
+                        <button onClick={() => deleteNote(note.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#d1d5db", display: "flex" }}><Icon name="trash" size={13} color="#d1d5db" /></button>
+                      </div>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 14, color: "#374151", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{note.text}</p>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Add note */}
+            <div style={{ padding: "14px 20px", background: "#fafbfd" }}>
+              <select value={newNoteAuthor} onChange={e => setNewNoteAuthor(e.target.value)}
+                style={{ width: "100%", padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 13, outline: "none", fontFamily: "inherit", marginBottom: 8, background: "#fff" }}>
+                {[...people].sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+              <textarea value={newNoteText} onChange={e => setNewNoteText(e.target.value)} placeholder={`Add a note, tip, link, or update to "${currentSection.label}"…`}
+                onKeyDown={e => { if (e.key === "Enter" && e.metaKey) addNote(); }}
+                rows={3} style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <span style={{ fontSize: 11, color: "#9ca3af" }}>Cmd+Enter to save · Notes are shared with the whole team</span>
+                <button onClick={addNote} disabled={!newNoteText.trim()} style={{ padding: "8px 18px", background: !newNoteText.trim() ? "#f0f2f5" : "#7c3aed", color: !newNoteText.trim() ? "#9ca3af" : "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: !newNoteText.trim() ? "default" : "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}>
+                  <Icon name="plus" size={13} color={!newNoteText.trim() ? "#9ca3af" : "#fff"} /> Add Note
+                </button>
+              </div>
             </div>
           </div>
-
-          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px 18px" }}>
-            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 8 }}>Anything else? Other training needs or goals</div>
-            <textarea value={personNote}
-              onChange={e => setTrainingNotes(prev => ({ ...prev, [selectedPerson]: e.target.value }))}
-              onBlur={e => onSave(selectedPerson, personChecklist, personTraining, e.target.value)}
-              placeholder="e.g. I'd love to get better at writing grant applications, or I want to learn how to use HPC for large simulations…"
-              rows={4} style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }} />
-          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
