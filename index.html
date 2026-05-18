@@ -350,6 +350,9 @@ function App() {
   const [toast, setToast] = useState(null);
   const [mgmtUnlocked, setMgmtUnlocked] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [onboardingChecklist, setOnboardingChecklist] = useState({});
+  const [onboardingTraining, setOnboardingTraining] = useState({});
+  const [onboardingNotes, setOnboardingNotes] = useState({});
 
   const [needsSeed, setNeedsSeed] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -358,13 +361,14 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [p, pe, d, out, gr, con] = await Promise.all([
+        const [p, pe, d, out, gr, con, ob] = await Promise.all([
           loadTable("projects"),
           loadTable("people"),
           loadTable("deliverables"),
           loadTable("outputs").catch(() => []),
           loadTable("grants").catch(() => []),
           loadTable("contacts").catch(() => []),
+          loadTable("onboarding").catch(() => []),
         ]);
         setProjects(p);
         setPeople(pe);
@@ -372,6 +376,18 @@ function App() {
         setOutputs(out);
         setGrants(gr);
         setContacts(con);
+        // Load onboarding data - stored as one record per person
+        const obChecklist = {};
+        const obTraining = {};
+        const obNotes = {};
+        ob.forEach(rec => {
+          obChecklist[rec.id] = rec.checklist || {};
+          obTraining[rec.id] = rec.trainingWants || [];
+          obNotes[rec.id] = rec.trainingNotes || "";
+        });
+        setOnboardingChecklist(obChecklist);
+        setOnboardingTraining(obTraining);
+        setOnboardingNotes(obNotes);
         // If all tables are empty, prompt user to seed
         if (p.length === 0 && pe.length === 0 && d.length === 0) {
           setNeedsSeed(true);
@@ -533,6 +549,17 @@ function App() {
     setSyncing(false);
   };
 
+  const saveOnboarding = async (personId, checklist, training, notes) => {
+    try {
+      await saveRecord("onboarding", {
+        id: personId,
+        checklist,
+        trainingWants: training,
+        trainingNotes: notes,
+      });
+    } catch(e) { console.error("Onboarding save error:", e); }
+  };
+
   const upsertContact = async (rec) => {
     const isNew = !contacts.find(c => c.id === rec.id);
     const record = isNew ? { ...rec, id: "con" + Date.now() } : rec;
@@ -569,8 +596,9 @@ function App() {
     { id: "people", label: "People", icon: "people" },
     { id: "deliverables", label: "Deliverables", icon: "deliverables" },
     { id: "outputs", label: "Outputs", icon: "star" },
-    { id: "grants", label: "Grant Pipeline", icon: "budget" },
+    { id: "grants", label: "Grants", icon: "budget" },
     { id: "contacts", label: "Contacts", icon: "people" },
+    { id: "onboarding", label: "Onboarding", icon: "info" },
     { id: "management", label: "Management", icon: "management", restricted: true },
   ];
 
@@ -716,6 +744,7 @@ function App() {
         {tab === "outputs" && <OutputsView outputs={outputs} projects={projects} people={people} onAdd={() => setModal({ type: "output", data: null })} onEdit={o => setModal({ type: "output", data: o })} onDelete={deleteOutput} />}
         {tab === "grants" && <GrantsView grants={grants} people={people} onAdd={() => setModal({ type: "grant", data: null })} onEdit={g => setModal({ type: "grant", data: g })} onDelete={deleteGrant} onConvertToProject={g => { const leadNames = g.leads || (g.lead ? [g.lead] : []); setModal({ type: "project", data: { name: g.title, summary: `Converted from grant: ${g.funder}${g.scheme ? " — "+g.scheme : ""}`, budget: g.amount || 0, status: "In Progress", lead: leadNames, teamMembers: g.teamMembers || [], startDate: new Date().toISOString().slice(0,10), tags: ["Grant"] } }); }} />}
         {tab === "contacts" && <ContactsView contacts={contacts} projects={projects} onAdd={() => setModal({ type: "contact", data: null })} onEdit={c => setModal({ type: "contact", data: c })} onDelete={deleteContact} />}
+        {tab === "onboarding" && <OnboardingView people={people} checklist={onboardingChecklist} setChecklist={setOnboardingChecklist} trainingWants={onboardingTraining} setTrainingWants={setOnboardingTraining} trainingNotes={onboardingNotes} setTrainingNotes={setOnboardingNotes} onSave={saveOnboarding} />}
         {tab === "management" && (
           mgmtUnlocked
             ? <ManagementView projects={projects} people={people} deliverables={deliverables} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
@@ -2522,6 +2551,62 @@ function PinGate({ onUnlock }) {
 }
 
 // ── Management View ───────────────────────────────────────────────────────────
+function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
+  const [sources, setSources] = useState(allocation.sources || []);
+  const [notes, setNotes] = useState(allocation.notes || "");
+
+  const addSource = () => setSources(s => [...s, { projectId: "", source: "", fte: 0, notes: "" }]);
+  const updateSource = (i, field, val) => setSources(s => s.map((src, idx) => idx === i ? { ...src, [field]: val } : src));
+  const removeSource = (i) => setSources(s => s.filter((_, idx) => idx !== i));
+  const totalFTE = sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
+  const available = parseFloat(person.availability) || 0;
+
+  return (
+    <div style={{ background: "#f8f9fb", borderRadius: 3, padding: 14, border: "1px solid #e2e5ea" }}>
+      {sources.map((src, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <select value={src.projectId} onChange={e => updateSource(i, "projectId", e.target.value)}
+            style={{ flex: 2, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: "#fff" }}>
+            <option value="">— Select project or source —</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name?.slice(0,50)}</option>)}
+            <option value="__university">University base salary</option>
+            <option value="__scholarship">Scholarship</option>
+            <option value="__fellowship">Fellowship</option>
+            <option value="__other">Other (see source field)</option>
+          </select>
+          <input value={src.source} onChange={e => updateSource(i, "source", e.target.value)} placeholder="Source label (optional)"
+            style={{ flex: 1.5, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="number" min="0" max="5" step="0.1" value={src.fte} onChange={e => updateSource(i, "fte", e.target.value)}
+              style={{ width: 70, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", textAlign: "center" }} />
+            <span style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>FTE</span>
+          </div>
+          <input value={src.notes} onChange={e => updateSource(i, "notes", e.target.value)} placeholder="Notes…"
+            style={{ flex: 1, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+          <button onClick={() => removeSource(i)} style={{ padding: "7px 8px", border: "1px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer" }}>
+            <Icon name="trash" size={13} color="#dc2626" />
+          </button>
+        </div>
+      ))}
+      <button onClick={addSource} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
+        <Icon name="plus" size={13} color="#6b7280" /> Add source
+      </button>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: totalFTE > available + 0.01 ? "#dc2626" : totalFTE < available - 0.01 ? "#d97706" : "#16a34a", marginBottom: 6 }}>
+          {totalFTE.toFixed(1)} / {available} FTE allocated {totalFTE > available + 0.01 ? "⚠ Over budget!" : totalFTE < available - 0.01 ? `⚠ ${(available-totalFTE).toFixed(1)} FTE unaccounted` : "✓ Fully allocated"}
+        </div>
+        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="General notes (e.g. salary review due, contract end date…)"
+          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => onSave({ sources, notes })} style={{ padding: "7px 16px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Save</button>
+        <button onClick={onCancel} style={{ padding: "7px 14px", background: "#fff", color: "#6b7280", border: "1.5px solid #dde1e9", borderRadius: 2, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+
 function ManagementView({ projects, people, deliverables, onLock, onEditProject }) {
   const [mgmtTab, setMgmtTab] = useState("health");
   const today = new Date();
@@ -2579,6 +2664,8 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
     .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
   const [exporting, setExporting] = useState(false);
+  const [salaryAllocations, setSalaryAllocations] = useState({});
+  const [editingSalary, setEditingSalary] = useState(null);
   const [emailModal, setEmailModal] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -2589,6 +2676,7 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
     { id: "workload", label: "Workload", icon: "workload" },
     { id: "budget", label: "Budget", icon: "budget" },
     { id: "deadlines", label: "Deadlines", icon: "calendar" },
+    { id: "salary", label: "Salary Allocations", icon: "budget" },
     { id: "peoplereport", label: "People Report", icon: "people" },
     { id: "projectreport", label: "Project Report", icon: "projects" },
   ];
@@ -3000,6 +3088,146 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
         </div>
       )}
 
+      {/* ── Salary Allocations ── */}
+      {mgmtTab === "salary" && (() => {
+        const totalLabFTE = people.reduce((s, p) => s + (parseFloat(p.availability)||0), 0);
+
+        return (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: "0 0 4px", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "#0f1f3d" }}>Salary & FTE Allocations</h2>
+                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Track which projects fund each person's salary and by how much FTE. Total lab: {totalLabFTE.toFixed(1)} FTE across {people.length} people.</p>
+              </div>
+            </div>
+
+            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", display: "flex", gap: 20 }}>
+                {["Name / Role", "Availability", "Salary Source / Project Allocations", "Notes"].map((h, i) => (
+                  <div key={h} style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, flex: i === 2 ? 2 : i === 0 ? 1.2 : i === 3 ? 1 : "none", width: i === 1 ? 100 : undefined }}>{h}</div>
+                ))}
+              </div>
+
+              {[...people].sort((a, b) => {
+                const LEADERSHIP_ORDER = ["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Administrative Assistant","Research Assistant","PhD Candidate","Masters Student"];
+                const ra = Array.isArray(a.roles) ? a.roles[0] : (a.role||"");
+                const rb = Array.isArray(b.roles) ? b.roles[0] : (b.role||"");
+                return (LEADERSHIP_ORDER.indexOf(ra)+1||99) - (LEADERSHIP_ORDER.indexOf(rb)+1||99) || a.name.localeCompare(b.name);
+              }).map((person, idx) => {
+                const role = Array.isArray(person.roles) ? person.roles[0] : (person.role||"");
+                const rc = ROLE_COLORS[role] || "#6b7280";
+                const alloc = salaryAllocations[person.id] || { sources: [], notes: "" };
+                const totalAllocFTE = alloc.sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
+                const isOver = totalAllocFTE > (parseFloat(person.availability)||0) + 0.01;
+                const isUnder = totalAllocFTE < (parseFloat(person.availability)||0) - 0.01;
+                const isEditing = editingSalary === person.id;
+
+                return (
+                  <div key={person.id} style={{ borderBottom: idx < people.length-1 ? "1px solid #f0f2f5" : "none" }}>
+                    <div style={{ display: "flex", gap: 20, padding: "14px 20px", alignItems: "flex-start" }}>
+                      {/* Name */}
+                      <div style={{ flex: 1.2, display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: rc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: rc, flexShrink: 0, overflow: "hidden", border: `2px solid ${rc}33` }}>
+                          {person.photoUrl ? <img src={person.photoUrl} alt={person.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : person.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d" }}>{person.name}</div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>{role}</div>
+                        </div>
+                      </div>
+
+                      {/* FTE */}
+                      <div style={{ width: 100, flexShrink: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d" }}>{person.availability||0} FTE</div>
+                        {totalAllocFTE > 0 && (
+                          <div style={{ fontSize: 11, fontWeight: 700, color: isOver ? "#dc2626" : isUnder ? "#d97706" : "#16a34a", marginTop: 2 }}>
+                            {totalAllocFTE.toFixed(1)} allocated {isOver ? "⚠ over" : isUnder ? "⚠ gap" : "✓"}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Allocations */}
+                      <div style={{ flex: 2, minWidth: 0 }}>
+                        {alloc.sources.length === 0 && !isEditing && (
+                          <span style={{ fontSize: 12, color: "#b0b8c4", fontStyle: "italic" }}>No allocations recorded</span>
+                        )}
+                        {!isEditing && alloc.sources.length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                            {alloc.sources.map((src, si) => {
+                              const proj = projects.find(p => p.id === src.projectId);
+                              return (
+                                <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ width: 38, height: 22, background: "#e85d2718", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <span style={{ fontSize: 11, fontWeight: 800, color: "#e85d27" }}>{src.fte} FTE</span>
+                                  </div>
+                                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600 }}>{src.source || (proj?.name?.slice(0,40)) || "—"}</span>
+                                  {src.notes && <span style={{ fontSize: 11, color: "#9ca3af" }}>· {src.notes}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {isEditing && (
+                          <SalaryEditor
+                            person={person}
+                            allocation={alloc}
+                            projects={projects}
+                            onSave={(updated) => {
+                              setSalaryAllocations(prev => ({ ...prev, [person.id]: updated }));
+                              setEditingSalary(null);
+                            }}
+                            onCancel={() => setEditingSalary(null)}
+                          />
+                        )}
+                      </div>
+
+                      {/* Notes */}
+                      <div style={{ flex: 1, fontSize: 12, color: "#9ca3af", fontStyle: "italic", minWidth: 0 }}>
+                        {!isEditing && (alloc.notes || "—")}
+                      </div>
+
+                      {/* Edit */}
+                      {!isEditing && (
+                        <button onClick={() => setEditingSalary(person.id)} style={{ padding: "5px 10px", border: "1px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                          <Icon name="edit" size={12} color="#6b7280" />Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Summary totals */}
+            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px 20px", marginTop: 16 }}>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 12 }}>FTE by Project</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {projects.filter(proj => {
+                  return Object.values(salaryAllocations).some(alloc =>
+                    alloc.sources?.some(src => src.projectId === proj.id)
+                  );
+                }).map(proj => {
+                  const projFTE = Object.values(salaryAllocations).reduce((s, alloc) => {
+                    return s + (alloc.sources||[]).filter(src => src.projectId === proj.id).reduce((ss, src) => ss + (parseFloat(src.fte)||0), 0);
+                  }, 0);
+                  return (
+                    <div key={proj.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#0f1f3d" }}>{proj.name}</div>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 18, fontWeight: 900, color: "#e85d27" }}>{projFTE.toFixed(1)} FTE</div>
+                      <div style={{ width: 120, background: "#f0f2f5", borderRadius: 99, height: 6, overflow: "hidden" }}>
+                        <div style={{ width: Math.min((projFTE/totalLabFTE)*100, 100)+"%" , height: "100%", background: "#e85d27", borderRadius: 99 }} />
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", width: 40, textAlign: "right" }}>{totalLabFTE > 0 ? ((projFTE/totalLabFTE)*100).toFixed(0) : 0}%</div>
+                    </div>
+                  );
+                })}
+                {Object.keys(salaryAllocations).length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", fontStyle: "italic" }}>Add allocations above to see project FTE summary</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── People Report ── */}
       {mgmtTab === "peoplereport" && (
         <div>
@@ -3145,6 +3373,286 @@ function ManagementView({ projects, people, deliverables, onLock, onEditProject 
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
+// ── Onboarding & Training View ────────────────────────────────────────────────
+const ONBOARDING_SECTIONS = [
+  {
+    id: "welcome", icon: "star", label: "Welcome & Values",
+    items: [
+      { id: "ob1", text: "Read the FLARE Onboarding Guide (this document)" },
+      { id: "ob2", text: "Understand FLARE's mission, values and expectations" },
+      { id: "ob3", text: "Meet with your direct supervisor to discuss goals" },
+      { id: "ob4", text: "Attend your first weekly team meeting" },
+      { id: "ob5", text: "Get added to the FLARE team website — contact Bee Pickering (bee.pickering@unimelb.edu.au)" },
+    ]
+  },
+  {
+    id: "it", icon: "info", label: "Access & IT Setup",
+    items: [
+      { id: "it1", text: "Set up University of Melbourne email and multi-factor authentication" },
+      { id: "it2", text: "Map the Pyromancer Drive (P:) — \\\\10.101.94.22\\Pyromancer" },
+      { id: "it3", text: "Map the Bushfire Drive (S:) — \\\\om-file\\220\\Shares\\SEFS Research data\\Restricted" },
+      { id: "it4", text: "Access the ServiceNow portal — serviceconnect.unimelb.edu.au" },
+      { id: "it5", text: "Access FLARE Research Tracker (this site!)" },
+      { id: "it6", text: "Get access to relevant software (R, Python, QGIS, etc.)" },
+      { id: "it7", text: "Complete required University online training modules" },
+    ]
+  },
+  {
+    id: "data", icon: "deliverables", label: "Data & File Management",
+    items: [
+      { id: "d1", text: "Read and understand the Data Management Plan (DMP)" },
+      { id: "d2", text: "Familiarise yourself with folder structure and file naming conventions" },
+      { id: "d3", text: "Understand data sharing policies and permissions" },
+      { id: "d4", text: "Set up backup procedures for your work" },
+      { id: "d5", text: "Learn where to find key datasets for your project" },
+    ]
+  },
+  {
+    id: "frost", icon: "fire", label: "FROST & Modelling Tools",
+    items: [
+      { id: "f1", text: "Introduction to FROST — what it is and how it's used" },
+      { id: "f2", text: "Understand FROST inputs and outputs" },
+      { id: "f3", text: "Run a test simulation under supervision" },
+      { id: "f4", text: "Access previously run simulations on the simulation register" },
+      { id: "f5", text: "FROST post-processing workflows" },
+    ]
+  },
+  {
+    id: "projects", icon: "projects", label: "Project & Time Management",
+    items: [
+      { id: "p1", text: "Understand the meeting structure (weekly team meetings, supervisor meetings)" },
+      { id: "p2", text: "Set up your deliverables in the Research Tracker" },
+      { id: "p3", text: "Discuss reporting requirements with your supervisor" },
+    ]
+  },
+  {
+    id: "admin", icon: "budget", label: "Administration & Processes",
+    items: [
+      { id: "a1", text: "Understand how to submit reimbursement claims via ServiceNow" },
+      { id: "a2", text: "Understand invoicing guidelines" },
+      { id: "a3", text: "Complete a risk assessment for fieldwork or travel if required" },
+      { id: "a4", text: "Understand leave request process and out-of-office etiquette" },
+      { id: "a5", text: "Familiarise yourself with publication and authorship processes" },
+    ]
+  },
+];
+
+const TRAINING_TOPICS = [
+  "FROST — introduction and setup",
+  "FROST — running simulations",
+  "FROST — post-processing outputs",
+  "Fire behaviour modelling theory",
+  "R / RStudio — basics",
+  "R — spatial data analysis",
+  "Python — basics",
+  "Python — data science (pandas, numpy)",
+  "QGIS — introduction",
+  "Remote sensing and LiDAR data",
+  "Statistical modelling",
+  "Writing grant applications",
+  "Manuscript writing and publishing",
+  "Science communication",
+  "Fieldwork safety and protocols",
+  "Data management best practices",
+  "High-performance computing (HPC)",
+  "Version control (Git/GitHub)",
+];
+
+function OnboardingView({ people, checklist, setChecklist, trainingWants, setTrainingWants, trainingNotes, setTrainingNotes, onSave }) {
+  const [selectedPerson, setSelectedPerson] = useState("");
+  const [activeSection, setActiveSection] = useState("checklist");
+
+  const person = people.find(p => p.id === selectedPerson);
+  const personChecklist = checklist[selectedPerson] || {};
+  const personTraining = trainingWants[selectedPerson] || [];
+  const personNote = trainingNotes[selectedPerson] || "";
+
+  const totalItems = ONBOARDING_SECTIONS.reduce((s, sec) => s + sec.items.length, 0);
+  const completedItems = Object.values(personChecklist).filter(Boolean).length;
+
+  const toggleItem = (itemId) => {
+    const newPersonChecklist = { ...personChecklist, [itemId]: !personChecklist[itemId] };
+    const newChecklist = { ...checklist, [selectedPerson]: newPersonChecklist };
+    setChecklist(newChecklist);
+    onSave(selectedPerson, newPersonChecklist, personTraining, personNote);
+  };
+
+  const toggleTraining = (topic) => {
+    const newTraining = personTraining.includes(topic)
+      ? personTraining.filter(t => t !== topic)
+      : [...personTraining, topic];
+    setTrainingWants(prev => ({ ...prev, [selectedPerson]: newTraining }));
+    onSave(selectedPerson, personChecklist, newTraining, personNote);
+  };
+
+  // Summary view - who has what outstanding
+  const SummaryView = () => (
+    <div>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 16 }}>Team Onboarding Overview</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+        {people.map(p => {
+          const pc = checklist[p.id] || {};
+          const done = Object.values(pc).filter(Boolean).length;
+          const pct = Math.round((done / totalItems) * 100);
+          const wants = trainingWants[p.id] || [];
+          const role = Array.isArray(p.roles) ? p.roles[0] : (p.role||"");
+          const rc = ROLE_COLORS[role] || "#6b7280";
+          return (
+            <div key={p.id} onClick={() => setSelectedPerson(p.id)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderTop: `3px solid ${rc}` }}
+              onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)"}
+              onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.04)"}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: rc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15, color: rc, overflow: "hidden", border: `2px solid ${rc}33` }}>
+                  {p.photoUrl ? <img src={p.photoUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : p.name.charAt(0)}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d" }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{role}</div>
+                </div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
+                  <span>Onboarding</span><span style={{ fontWeight: 700, color: pct === 100 ? "#16a34a" : "#e85d27" }}>{pct}%</span>
+                </div>
+                <ProgressBar value={pct} color={pct === 100 ? "#16a34a" : "#e85d27"} />
+              </div>
+              {wants.length > 0 && (
+                <div style={{ fontSize: 11, color: "#7c3aed", background: "#f5f3ff", padding: "4px 8px", borderRadius: 2, fontWeight: 600 }}>
+                  {wants.length} training topic{wants.length !== 1 ? "s" : ""} requested
+                </div>
+              )}
+              {done === 0 && <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>Not started</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h1 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Onboarding & Training</h1>
+          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14 }}>Track onboarding progress and training interests for each team member</p>
+        </div>
+      </div>
+
+      {/* Person selector */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 24, alignItems: "center" }}>
+        <select value={selectedPerson} onChange={e => setSelectedPerson(e.target.value)}
+          style={{ padding: "10px 16px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", background: "#fff", cursor: "pointer", fontWeight: 500, minWidth: 220 }}>
+          <option value="">— Team overview —</option>
+          {[...people].sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        {selectedPerson && (
+          <div style={{ display: "flex", background: "#fff", border: "1.5px solid #dde1e9", borderRadius: 3, overflow: "hidden" }}>
+            {[{ id: "checklist", label: "Checklist" }, { id: "training", label: "Training Interests" }].map(s => (
+              <button key={s.id} onClick={() => setActiveSection(s.id)} style={{ padding: "10px 18px", border: "none", background: activeSection === s.id ? "#0f1f3d" : "#fff", color: activeSection === s.id ? "#fff" : "#6b7280", fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5 }}>{s.label}</button>
+            ))}
+          </div>
+        )}
+        {selectedPerson && <button onClick={() => setSelectedPerson("")} style={{ padding: "9px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280" }}>← Overview</button>}
+      </div>
+
+      {/* Overview */}
+      {!selectedPerson && (people.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "#9ca3af", background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea" }}>
+          <Icon name="people" size={40} color="#e2e5ea" style={{ margin: "0 auto 12px", display: "block" }} />
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>People not loaded yet</div>
+          <div style={{ fontSize: 13 }}>The tracker is still connecting to the database. If this persists, check your Supabase connection.</div>
+        </div>
+      ) : <SummaryView />)}
+
+      {/* Person checklist */}
+      {selectedPerson && activeSection === "checklist" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            {person?.photoUrl && <img src={person.photoUrl} alt={person.name} style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", border: "2px solid #e2e5ea" }} />}
+            <div>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, textTransform: "uppercase", color: "#0f1f3d" }}>{person?.name}</div>
+              <div style={{ fontSize: 13, color: "#6b7280" }}>{completedItems} of {totalItems} items complete · {Math.round((completedItems/totalItems)*100)}%</div>
+            </div>
+            <div style={{ marginLeft: "auto", width: 200 }}>
+              <ProgressBar value={Math.round((completedItems/totalItems)*100)} color={completedItems === totalItems ? "#16a34a" : "#e85d27"} />
+            </div>
+          </div>
+
+          {ONBOARDING_SECTIONS.map(section => (
+            <div key={section.id} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", marginBottom: 14, overflow: "hidden" }}>
+              <div style={{ padding: "12px 18px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", gap: 8 }}>
+                <Icon name={section.icon} size={15} color="#0f1f3d" />
+                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>{section.label}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "#9ca3af" }}>
+                  {section.items.filter(item => personChecklist[item.id]).length}/{section.items.length}
+                </span>
+              </div>
+              <div style={{ padding: "8px 0" }}>
+                {section.items.map(item => {
+                  const done = personChecklist[item.id];
+                  return (
+                    <div key={item.id} onClick={() => toggleItem(item.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", cursor: "pointer", borderBottom: "1px solid #f5f5f5", transition: "background 0.1s" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f8f9fb"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <div style={{ width: 22, height: 22, borderRadius: 3, border: `2px solid ${done ? "#16a34a" : "#dde1e9"}`, background: done ? "#16a34a" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+                        {done && <Icon name="check" size={13} color="#fff" />}
+                      </div>
+                      <span style={{ fontSize: 14, color: done ? "#9ca3af" : "#374151", textDecoration: done ? "line-through" : "none", flex: 1 }}>{item.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Training interests */}
+      {selectedPerson && activeSection === "training" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            {person?.photoUrl && <img src={person.photoUrl} alt={person.name} style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", border: "2px solid #e2e5ea" }} />}
+            <div>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 22, textTransform: "uppercase", color: "#0f1f3d" }}>{person?.name}</div>
+              <div style={{ fontSize: 13, color: "#6b7280" }}>{personTraining.length} training topic{personTraining.length !== 1 ? "s" : ""} flagged</div>
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px 18px", marginBottom: 16 }}>
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 6 }}>What would you like to learn or get trained in?</div>
+            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 14 }}>Tick everything you'd like to be covered, trained in, or want to learn more about. This helps the team plan training sessions.</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
+              {TRAINING_TOPICS.map(topic => {
+                const selected = personTraining.includes(topic);
+                return (
+                  <div key={topic} onClick={() => toggleTraining(topic)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 3, border: `1.5px solid ${selected ? "#7c3aed" : "#e5e7eb"}`, background: selected ? "#f5f3ff" : "#fff", cursor: "pointer", transition: "all 0.15s" }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 3, border: `2px solid ${selected ? "#7c3aed" : "#dde1e9"}`, background: selected ? "#7c3aed" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+                      {selected && <Icon name="check" size={12} color="#fff" />}
+                    </div>
+                    <span style={{ fontSize: 13, color: selected ? "#7c3aed" : "#374151", fontWeight: selected ? 700 : 400 }}>{topic}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "16px 18px" }}>
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 8 }}>Anything else? Other training needs or goals</div>
+            <textarea value={personNote}
+              onChange={e => setTrainingNotes(prev => ({ ...prev, [selectedPerson]: e.target.value }))}
+              onBlur={e => onSave(selectedPerson, personChecklist, personTraining, e.target.value)}
+              placeholder="e.g. I'd love to get better at writing grant applications, or I want to learn how to use HPC for large simulations…"
+              rows={4} style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Outputs View ──────────────────────────────────────────────────────────────
 function OutputsView({ outputs, projects, people, onAdd, onEdit, onDelete }) {
   const [search, setSearch] = useState("");
