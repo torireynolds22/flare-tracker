@@ -414,9 +414,9 @@ function App() {
         setOnboardingChecklist(obChecklist);
         setOnboardingTraining(obTraining);
         setOnboardingNotes(obNotes);
-        // Load salary allocations
+        // Load salary allocations (stored as { id, data: { sources, contracts, notes } })
         const salMap = {};
-        sal.forEach(rec => { salMap[rec.id] = rec; });
+        sal.forEach(rec => { salMap[rec.id] = rec.data || rec; });
         setSalaryAllocations(salMap);
         // Only show seed banner if tables are genuinely empty after two checks
         // This prevents false positives from slow/intermittent Supabase connections
@@ -598,12 +598,17 @@ function App() {
 
   const saveSalaryAllocation = async (personId, allocation) => {
     try {
-      const record = { id: personId, ...allocation };
-      await saveRecord("salary", record);
+      // saveRecord puts sources/contracts/notes inside data field automatically
+      await saveRecord("salary", { id: personId, ...allocation });
       setSalaryAllocations(prev => ({ ...prev, [personId]: allocation }));
+      showToast("Salary allocation saved");
     } catch(e) {
       console.error("Salary save error:", e);
-      showToast("Failed to save: " + e.message, "error");
+      if (e.message.includes("404") || e.message.includes("does not exist")) {
+        showToast("Salary table not found — run the SQL in Supabase first", "error");
+      } else {
+        showToast("Save failed: " + e.message, "error");
+      }
     }
   };
 
