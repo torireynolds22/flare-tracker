@@ -3345,8 +3345,8 @@ function ManagementView({ projects, people, deliverables, salaryAllocations: sal
                             person={person}
                             allocation={alloc}
                             projects={projects}
-                            onSave={(updated) => {
-                              setSalaryAllocations(prev => ({ ...prev, [person.id]: updated }));
+                            onSave={async (updated) => {
+                              await onSaveSalary(person.id, updated);
                               setEditingSalary(null);
                             }}
                             onCancel={() => setEditingSalary(null)}
