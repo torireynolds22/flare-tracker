@@ -51,7 +51,6 @@ async function loadTable(table) {
 }
 async function saveRecord(table, record) {
   const { id, ...rest } = record;
-  // Sanitise - ensure everything is JSON-serialisable
   const sanitised = JSON.parse(JSON.stringify(rest));
   const payload = { id: String(id), data: sanitised };
   const res = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
@@ -67,6 +66,28 @@ async function saveRecord(table, record) {
   if (!res.ok) {
     const text = await res.text();
     console.error('saveRecord error:', res.status, text, 'payload:', JSON.stringify(payload).slice(0, 500));
+    throw new Error(res.status + ': ' + text);
+  }
+}
+
+// Insert ONLY if record doesn't exist yet — never overwrites existing data
+async function insertIfNew(table, record) {
+  const { id, ...rest } = record;
+  const sanitised = JSON.parse(JSON.stringify(rest));
+  const payload = { id: String(id), data: sanitised };
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=ignore-duplicates,return=minimal',  // IGNORE if exists
+    },
+    body: JSON.stringify(payload),
+  });
+  // 409 conflict = already exists = that's fine, don't throw
+  if (!res.ok && res.status !== 409) {
+    const text = await res.text();
     throw new Error(res.status + ': ' + text);
   }
 }
@@ -356,6 +377,7 @@ function App() {
   const [onboardingChecklist, setOnboardingChecklist] = useState({});
   const [onboardingTraining, setOnboardingTraining] = useState({});
   const [onboardingNotes, setOnboardingNotes] = useState({});
+  const [salaryAllocations, setSalaryAllocations] = useState({});
 
   const [needsSeed, setNeedsSeed] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -396,9 +418,26 @@ function App() {
         const salMap = {};
         sal.forEach(rec => { salMap[rec.id] = rec; });
         setSalaryAllocations(salMap);
-        // If all tables are empty, prompt user to seed
+        // Only show seed banner if tables are genuinely empty after two checks
+        // This prevents false positives from slow/intermittent Supabase connections
         if (p.length === 0 && pe.length === 0 && d.length === 0) {
-          setNeedsSeed(true);
+          // Wait 3 seconds and try again before showing the banner
+          setTimeout(async () => {
+            try {
+              const [p2, pe2, d2] = await Promise.all([
+                loadTable("projects"),
+                loadTable("people"),
+                loadTable("deliverables"),
+              ]);
+              // Only show if STILL empty after retry
+              if (p2.length === 0 && pe2.length === 0 && d2.length === 0) {
+                setNeedsSeed(true);
+              } else {
+                // Data loaded on retry — update state silently
+                setProjects(p2); setPeople(pe2); setDeliverables(d2);
+              }
+            } catch { /* connection failing - don't show banner, just wait */ }
+          }, 3000);
         }
       } catch (err) {
         console.error("Supabase load error:", err);
@@ -411,17 +450,17 @@ function App() {
   const runSeed = async () => {
     setSeeding(true);
     try {
-      // Write one at a time so we can catch exactly which one fails
+      // Use insertIfNew — NEVER overwrites existing records (photos, edits, etc. are preserved)
       for (const r of SEED_PROJECTS) {
-        try { await saveRecord("projects", r); }
+        try { await insertIfNew("projects", r); }
         catch(e) { console.error("Failed project", r.id, e.message); throw e; }
       }
       for (const r of SEED_PEOPLE) {
-        try { await saveRecord("people", r); }
+        try { await insertIfNew("people", r); }
         catch(e) { console.error("Failed person", r.id, e.message); throw e; }
       }
       for (const r of SEED_DELIVERABLES) {
-        try { await saveRecord("deliverables", r); }
+        try { await insertIfNew("deliverables", r); }
         catch(e) { console.error("Failed deliverable", r.id, e.message); throw e; }
       }
       // Reload
