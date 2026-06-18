@@ -810,7 +810,7 @@ function App() {
         {tab === "onboarding" && <OnboardingView people={people} checklist={onboardingChecklist} setChecklist={setOnboardingChecklist} trainingWants={onboardingTraining} setTrainingWants={setOnboardingTraining} trainingNotes={onboardingNotes} setTrainingNotes={setOnboardingNotes} onSave={saveOnboarding} />}
         {tab === "management" && (
           mgmtUnlocked
-            ? <ManagementView projects={projects} people={people} deliverables={deliverables} salaryAllocations={salaryAllocations} onSaveSalary={saveSalaryAllocation} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
+            ? <ManagementView projects={projects} people={people} deliverables={deliverables} outputs={outputs} salaryAllocations={salaryAllocations} onSaveSalary={saveSalaryAllocation} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
             : <PinGate onUnlock={() => setMgmtUnlocked(true)} />
         )}
       </div>
@@ -1272,7 +1272,15 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
     );
   };
 
-  const projOutputs = (allOutputs || []).filter(o => o.project === p.id);
+  const projOutputs = (allOutputs || []).filter(o => {
+    if (!o.project) return false;
+    if (o.project === p.id) return true;
+    if (o.project === p.name) return true;
+    // Handle truncated names from the select dropdown (sliced to 50 chars)
+    if (p.name && p.name.startsWith(o.project)) return true;
+    if (p.name && o.project === p.name.slice(0, 50)) return true;
+    return false;
+  });
 
   const sections = [
     { id: "overview", label: "Overview" },
@@ -1492,12 +1500,14 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
 
           {activeSection === "budget" && (() => {
             const payments = p.payments || [];
-            const expenses = p.expenses || [];
-            const totalPaid = payments.reduce((s, pay) => s + (parseFloat(pay.amount) || 0), 0);
-            const totalExpenses = expenses.reduce((s, ex) => s + (parseFloat(ex.amount) || 0), 0);
-            const effectiveSpent = totalExpenses > 0 ? totalExpenses : spent;
+            const currentBalance = p.currentBalance ?? null;
+            const totalReceived = payments.reduce((s, pay) => s + (parseFloat(pay.amount)||0), 0);
+            const effectiveSpent = (currentBalance !== null && totalReceived > 0)
+              ? totalReceived - currentBalance
+              : (currentBalance !== null ? allocated - currentBalance : spent);
             const effectiveBurn = allocated > 0 ? (effectiveSpent / allocated) * 100 : 0;
             const effectiveRemaining = allocated - effectiveSpent;
+            const stillToReceive = allocated - totalReceived;
 
             return (
               <div>
@@ -1509,13 +1519,13 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                   </div>
                 ) : (
                   <div>
-                    {/* Summary cards */}
+                    {/* Top summary cards */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
                       {[
-                        { label: "Total Allocated", value: "$" + allocated.toLocaleString(), color: "#0f1f3d", bg: "#f0f2f6", sub: "Project budget" },
-                        { label: "Received", value: totalPaid > 0 ? "$" + totalPaid.toLocaleString() : "—", color: "#16a34a", bg: "#f0fdf4", sub: payments.length + " payment(s)" },
-                        { label: "Expended", value: "$" + effectiveSpent.toLocaleString(), color: effectiveSpent > allocated ? "#dc2626" : "#e85d27", bg: effectiveSpent > allocated ? "#fef2f2" : "#fff7f5", sub: effectiveBurn.toFixed(0) + "% of budget" },
-                        { label: "Remaining", value: "$" + Math.abs(effectiveRemaining).toLocaleString(), color: effectiveRemaining < 0 ? "#dc2626" : "#16a34a", bg: effectiveRemaining < 0 ? "#fef2f2" : "#f0fdf4", sub: effectiveRemaining < 0 ? "Over budget!" : "Available" },
+                        { label: "Total Allocated", value: "$" + allocated.toLocaleString(), sub: "Full project budget", color: "#0f1f3d", bg: "#f0f2f6" },
+                        { label: "Received to Date", value: totalReceived > 0 ? "$" + totalReceived.toLocaleString() : "—", sub: payments.length + " payment(s)" + (stillToReceive > 0 ? " · $" + stillToReceive.toLocaleString() + " still to come" : " · Fully received"), color: "#16a34a", bg: "#f0fdf4" },
+                        { label: "Current Balance", value: currentBalance !== null ? "$" + currentBalance.toLocaleString() : "—", sub: currentBalance !== null ? "In account now" : "Tap Edit to update", color: currentBalance < 5000 ? "#dc2626" : "#2563eb", bg: currentBalance !== null && currentBalance < 5000 ? "#fef2f2" : "#eff6ff" },
+                        { label: "Spent to Date", value: effectiveSpent > 0 ? "$" + Math.round(effectiveSpent).toLocaleString() : "—", sub: effectiveBurn.toFixed(0) + "% of budget", color: effectiveSpent > allocated ? "#dc2626" : "#e85d27", bg: "#fff7f5" },
                       ].map(s => (
                         <div key={s.label} style={{ background: s.bg, borderRadius: 3, padding: "16px", border: "1px solid #e2e5ea" }}>
                           <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>{s.label}</div>
@@ -1525,11 +1535,49 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                       ))}
                     </div>
 
+                    {/* Current balance quick-update */}
+                    <div style={{ background: "#fff", borderRadius: 3, padding: "18px 20px", marginBottom: 20, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 12 }}>Update Current Account Balance</div>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Enter the current balance sitting in the project account right now</div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontSize: 16, color: "#6b7280", fontWeight: 700 }}>$</span>
+                            <input
+                              type="number"
+                              defaultValue={currentBalance ?? ""}
+                              placeholder="e.g. 1040"
+                              id={"balance-input-" + p.id}
+                              style={{ flex: 1, padding: "10px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 16, outline: "none", fontFamily: "inherit", fontWeight: 700 }}
+                            />
+                            <button onClick={() => {
+                              const val = parseFloat(document.getElementById("balance-input-" + p.id)?.value);
+                              if (!isNaN(val)) onUpdateProject({ ...p, currentBalance: val, aiAssessments, notes });
+                            }} style={{ padding: "10px 20px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                              Save Balance
+                            </button>
+                          </div>
+                        </div>
+                        {currentBalance !== null && (
+                          <div style={{ padding: "12px 16px", background: currentBalance < 1000 ? "#fef2f2" : currentBalance < 10000 ? "#fef9c3" : "#f0fdf4", borderRadius: 3, border: `1px solid ${currentBalance < 1000 ? "#fca5a5" : currentBalance < 10000 ? "#fde68a" : "#86efac"}`, minWidth: 180 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: currentBalance < 1000 ? "#dc2626" : currentBalance < 10000 ? "#d97706" : "#16a34a", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                              {currentBalance < 1000 ? "⚠ Very Low Balance" : currentBalance < 10000 ? "⚠ Low Balance" : "✓ Healthy Balance"}
+                            </div>
+                            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 900, color: currentBalance < 1000 ? "#dc2626" : currentBalance < 10000 ? "#d97706" : "#16a34a" }}>
+                              ${currentBalance.toLocaleString()}
+                            </div>
+                            {totalReceived > 0 && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>≈ ${Math.round(effectiveSpent).toLocaleString()} spent so far</div>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Burn rate */}
                     <div style={{ background: "#fff", borderRadius: 3, padding: "18px 20px", marginBottom: 20, border: "1px solid #e2e5ea" }}>
                       <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 15, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 14 }}>Budget Burn vs Progress</div>
                       {[
-                        { label: "Expended", pct: effectiveBurn, color: effectiveBurn > progressPct + 15 ? "#dc2626" : "#e85d27" },
+                        { label: "Spent", pct: effectiveBurn, color: effectiveBurn > progressPct + 15 ? "#dc2626" : "#e85d27" },
+                        { label: "Received", pct: allocated > 0 ? (totalReceived / allocated) * 100 : 0, color: "#16a34a" },
                         { label: "Progress", pct: progressPct, color: "#2563eb" },
                       ].map(b => (
                         <div key={b.label} style={{ marginBottom: 12 }}>
@@ -1555,14 +1603,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                     <BudgetEntryTable
                       title="Payments Received" addLabel="Add Payment"
                       entries={payments} color="#16a34a"
-                      onSave={async updated => { await onUpdateProject({ ...p, payments: updated, aiAssessments, notes }); }}
-                    />
-
-                    {/* Expenditure log */}
-                    <BudgetEntryTable
-                      title="Expenditure Log" addLabel="Add Expense"
-                      entries={expenses} color="#e85d27"
-                      onSave={async updated => { await onUpdateProject({ ...p, expenses: updated, aiAssessments, notes }); }}
+                      onSave={async updated => { await onUpdateProject({ ...p, payments: updated, currentBalance, aiAssessments, notes }); }}
                     />
                   </div>
                 )}
@@ -1570,8 +1611,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
             );
           })()}
 
-          {/* ACTIVITY LOG */}
-          {activeSection === "notes" && (
+                    {activeSection === "notes" && (
             <div>
               {/* Add note */}
               <div style={{ background: "#fff", borderRadius: 3, padding: "20px 22px", marginBottom: 20, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
@@ -2741,7 +2781,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
 }
 
 
-function ManagementView({ projects, people, deliverables, salaryAllocations: salaryAllocsProp, onSaveSalary, onLock, onEditProject }) {
+function ManagementView({ projects, people, deliverables, outputs: allOutputs, salaryAllocations: salaryAllocsProp, onSaveSalary, onLock, onEditProject }) {
   const [mgmtTab, setMgmtTab] = useState("health");
   const today = new Date();
 
@@ -3511,7 +3551,7 @@ function ManagementView({ projects, people, deliverables, salaryAllocations: sal
               <span style={{ fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:17,textTransform:"uppercase",letterSpacing:0.8,color:"#0f1f3d" }}>Full Project Overview</span>
             </div>
             <table style={{ width:"100%",borderCollapse:"collapse" }}>
-              <thead><tr style={{ background:"#fafbfc" }}>{["Project","Lead","Status","Progress","Budget","Spent","Deliverables","Overdue","Planned Outputs"].map(h=><th key={h} style={{ padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1 }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background:"#fafbfc" }}>{["Project","Lead","Status","Progress","Budget","Deliverables","Overdue","Planned Outputs","Actual Outputs"].map(h=><th key={h} style={{ padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1 }}>{h}</th>)}</tr></thead>
               <tbody>
                 {projects.map((proj,i) => {
                   const dels = deliverables.filter(d=>d.project===proj.id);
@@ -3523,7 +3563,9 @@ function ManagementView({ projects, people, deliverables, salaryAllocations: sal
                     <tr key={proj.id} style={{ borderBottom:i<projects.length-1?"1px solid #f5f5f5":"none",borderLeft:"3px solid "+(ragColors[rag]||"#e5e7eb") }}>
                       <td style={{ padding:"11px 14px" }}>
                         <div style={{ fontSize:13,fontWeight:700,color:"#0f1f3d",maxWidth:220,lineHeight:1.3 }}>{proj.name}</div>
-                        {proj.code&&<div style={{ fontSize:10,color:"#9ca3af",marginTop:2,fontFamily:"monospace" }}>{proj.code}</div>}
+                        <div style={{ display:"flex",gap:8,marginTop:3,alignItems:"center",flexWrap:"wrap" }}>
+                          {proj.code&&<span style={{ fontSize:10,color:"#9ca3af",fontFamily:"monospace",background:"#f3f4f6",padding:"1px 6px",borderRadius:2 }}>{proj.code}</span>}
+                        </div>
                       </td>
                       <td style={{ padding:"11px 14px",fontSize:12,color:"#6b7280" }}>{getLeadString(proj)}</td>
                       <td style={{ padding:"11px 14px" }}><StatusBadge status={proj.status} /></td>
@@ -3536,13 +3578,41 @@ function ManagementView({ projects, people, deliverables, salaryAllocations: sal
                         </div>
                       </td>
                       <td style={{ padding:"11px 14px",fontSize:12,fontWeight:600,color:"#0f1f3d" }}>{proj.budget>0?"$"+proj.budget.toLocaleString():"—"}</td>
-                      <td style={{ padding:"11px 14px",fontSize:12,color:proj.budgetSpent>proj.budget&&proj.budget>0?"#dc2626":"#6b7280" }}>{proj.budgetSpent>0?"$"+proj.budgetSpent.toLocaleString():"—"}</td>
+                      <td style={{ padding:"11px 14px",fontSize:12,fontWeight:600,color:proj.currentBalance!==null&&proj.currentBalance!==undefined&&proj.currentBalance<5000?"#dc2626":proj.currentBalance<10000?"#d97706":"#16a34a" }}>{proj.currentBalance!=null?"$"+proj.currentBalance.toLocaleString():"—"}</td>
                       <td style={{ padding:"11px 14px",fontSize:12,color:"#6b7280" }}>{done}/{dels.length}</td>
                       <td style={{ padding:"11px 14px",fontSize:12,color:overdue>0?"#dc2626":"#9ca3af",fontWeight:overdue>0?700:400 }}>{overdue>0?overdue+" overdue":"—"}</td>
-                      <td style={{ padding:"11px 14px" }}>
+                      <td style={{ padding:"11px 14px", maxWidth: 200 }}>
                         <div style={{ display:"flex",gap:4,flexWrap:"wrap" }}>
                           {(proj.plannedOutputs||[]).map(o=><span key={o} style={{fontSize:9,fontWeight:700,color:"#7c3aed",background:"#f5f3ff",padding:"2px 6px",borderRadius:99}}>{o}</span>)}
+                          {!(proj.plannedOutputs?.length) && <span style={{fontSize:11,color:"#d1d5db"}}>—</span>}
                         </div>
+                      </td>
+                      <td style={{ padding:"11px 14px", maxWidth: 220 }}>
+                        {(() => {
+                          const projOuts = (allOutputs||[]).filter(o =>
+                            o.project === proj.id || o.project === proj.name ||
+                            (o.project && proj.name && o.project === proj.name.slice(0,50))
+                          );
+                          if (projOuts.length === 0) return <span style={{fontSize:11,color:"#d1d5db"}}>—</span>;
+                          const TYPE_COLORS_R = {"Journal Article":"#2563eb","Conference Paper":"#7c3aed","Report":"#059669","Dataset":"#d97706","Tool / Dashboard":"#0891b2","Data Product":"#7c3aed","Presentation":"#dc2626","Policy Brief":"#0f766e","Other":"#6b7280"};
+                          const STATUS_DONE = ["Published","Live"];
+                          return (
+                            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                              {projOuts.map(o => {
+                                const tc = TYPE_COLORS_R[o.type]||"#6b7280";
+                                const done = STATUS_DONE.includes(o.status);
+                                return (
+                                  <div key={o.id} style={{display:"flex",alignItems:"center",gap:5}}>
+                                    <div style={{width:6,height:6,borderRadius:"50%",background:done?"#16a34a":o.progress>50?"#e85d27":"#d1d5db",flexShrink:0}} />
+                                    <span style={{fontSize:11,color:"#374151",fontWeight:600,lineHeight:1.3}}>{o.title?.slice(0,35)}{o.title?.length>35?"…":""}</span>
+                                    {o.progress > 0 && !done && <span style={{fontSize:10,color:"#e85d27",fontWeight:700,flexShrink:0}}>{o.progress}%</span>}
+                                    {done && <span style={{fontSize:9,color:"#16a34a",fontWeight:800,flexShrink:0}}>✓</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
@@ -4246,7 +4316,18 @@ function OutputModal({ data, projects, people, onSave, onClose }) {
             <span style={{ fontSize: 14, fontWeight: 700, color: "#e85d27", width: 40, textAlign: "right" }}>{form.progress}%</span>
           </div>
         </Field>
-        <Field label="Linked Project"><Select value={form.project} onChange={set("project")} options={[{ value: "", label: "None" }, ...projects.map(p => ({ value: p.id, label: p.name.slice(0,50) }))]} /></Field>
+        <Field label="Linked Project">
+          {data?.project && projects.find(p => p.id === data.project) ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: 3, fontSize: 14, color: "#166534", fontWeight: 600 }}>
+                ✓ {projects.find(p => p.id === data.project)?.name}
+              </div>
+              <button type="button" onClick={() => set("project")("")} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "1px solid #e5e7eb", borderRadius: 2, padding: "6px 10px", cursor: "pointer" }}>Change</button>
+            </div>
+          ) : (
+            <Select value={form.project} onChange={set("project")} options={[{ value: "", label: "— None —" }, ...projects.map(p => ({ value: p.id, label: p.name.slice(0,50) }))]} />
+          )}
+        </Field>
         <Field label="DOI"><Input value={form.doi} onChange={set("doi")} placeholder="10.xxxx/xxxxx" /></Field>
         <Field label="URL"><Input value={form.url} onChange={set("url")} placeholder="https://…" /></Field>
       </div>
@@ -4451,7 +4532,18 @@ function ContactModal({ data, projects, onSave, onClose }) {
         <Field label="Contact Type"><Select value={form.type} onChange={set("type")} options={CONTACT_TYPES} /></Field>
         <Field label="Email"><Input type="email" value={form.email} onChange={set("email")} placeholder="jane@org.gov.au" /></Field>
         <Field label="Phone"><Input value={form.phone} onChange={set("phone")} placeholder="02 xxxx xxxx" /></Field>
-        <Field label="Linked Project"><Select value={form.project} onChange={set("project")} options={[{ value: "", label: "None" }, ...projects.map(p => ({ value: p.id, label: p.name.slice(0,50) }))]} /></Field>
+        <Field label="Linked Project">
+          {data?.project && projects.find(p => p.id === data.project) ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, padding: "9px 12px", background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: 3, fontSize: 14, color: "#166534", fontWeight: 600 }}>
+                ✓ {projects.find(p => p.id === data.project)?.name}
+              </div>
+              <button type="button" onClick={() => set("project")("")} style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "1px solid #e5e7eb", borderRadius: 2, padding: "6px 10px", cursor: "pointer" }}>Change</button>
+            </div>
+          ) : (
+            <Select value={form.project} onChange={set("project")} options={[{ value: "", label: "— None —" }, ...projects.map(p => ({ value: p.id, label: p.name.slice(0,50) }))]} />
+          )}
+        </Field>
       </div>
       <Field label="Notes"><Textarea value={form.notes} onChange={set("notes")} placeholder="Key context, relationship notes…" rows={3} /></Field>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8 }}>
@@ -4468,6 +4560,7 @@ function ProjectModal({ data, people, onSave, onClose }) {
     id: data?.id || "", name: data?.name || "", code: data?.code || "", lead: data?.lead || "",
     status: data?.status || "In Progress", budget: data?.budget || 0,
     budgetSpent: data?.budgetSpent || 0,
+    currentBalance: data?.currentBalance ?? "",
     startDate: data?.startDate || "", endDate: data?.endDate || "",
     progress: data?.progress || 0, summary: data?.summary || "",
     tags: (data?.tags || []).join(", "),
@@ -4501,7 +4594,7 @@ function ProjectModal({ data, people, onSave, onClose }) {
 
   const handleSave = () => {
     if (!form.name.trim()) return alert("Project name is required");
-    onSave({ ...form, budget: Number(form.budget), budgetSpent: Number(form.budgetSpent || 0), progress: Number(form.progress), tags: form.tags.split(",").map(t => t.trim()).filter(Boolean) });
+    onSave({ ...form, budget: Number(form.budget), budgetSpent: Number(form.budgetSpent || 0), currentBalance: form.currentBalance !== "" ? Number(form.currentBalance) : null, progress: Number(form.progress), tags: form.tags.split(",").map(t => t.trim()).filter(Boolean) });
   };
 
   return (
