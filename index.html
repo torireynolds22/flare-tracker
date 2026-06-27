@@ -1388,6 +1388,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
   const [savingNote, setSavingNote] = useState(false);
   const [activeSection, setActiveSection] = useState("overview");
   const [showCompleted, setShowCompleted] = useState(true);
+  const [localBalance, setLocalBalance] = useState(p.currentBalance ?? "");
 
   const projDels = deliverables.filter(d => d.project === p.id);
   const done = projDels.filter(d => d.status === "Completed").length;
@@ -1719,7 +1720,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
           )}
 
           {activeSection === "budget" && (() => {
-            const payments = p.payments || [];
+            const payments = (p.payments || []);
             const currentBalance = p.currentBalance ?? null;
             const totalReceived = payments.reduce((s, pay) => s + (parseFloat(pay.amount)||0), 0);
             const effectiveSpent = (currentBalance !== null && totalReceived > 0)
@@ -1765,13 +1766,13 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                             <span style={{ fontSize: 16, color: "#6b7280", fontWeight: 700 }}>$</span>
                             <input
                               type="number"
-                              defaultValue={currentBalance ?? ""}
+                              value={localBalance ?? ""}
                               placeholder="e.g. 1040"
-                              id={"balance-input-" + p.id}
+                              onChange={e => setLocalBalance(e.target.value)}
                               style={{ flex: 1, padding: "10px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 16, outline: "none", fontFamily: "inherit", fontWeight: 700 }}
                             />
                             <button onClick={() => {
-                              const val = parseFloat(document.getElementById("balance-input-" + p.id)?.value);
+                              const val = parseFloat(localBalance);
                               if (!isNaN(val)) onUpdateProject({ ...p, currentBalance: val, aiAssessments, notes });
                             }} style={{ padding: "10px 20px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", whiteSpace: "nowrap" }}>
                               Save Balance
@@ -1911,7 +1912,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
           {(p.tags?.length > 0) && (
             <div style={{ background: "#fff", borderRadius: 3, padding: "16px 18px", marginBottom: 16, border: "1px solid #e2e5ea", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
               <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>Research Tags</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{p.tags.map(t => <Tag key={t} label={t} color="#2563eb" />)}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{(p.tags||[]).map(t => <Tag key={t} label={t} color="#2563eb" />)}</div>
             </div>
           )}
 
