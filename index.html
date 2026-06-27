@@ -855,7 +855,7 @@ function App() {
         {tab === "mytasks" && <MyTasksView projects={projects} people={people} deliverables={deliverables} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
         {tab === "projects" && <ProjectsView projects={projects} people={people} deliverables={deliverables} outputs={outputs} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "project", data: null })} onEdit={p => setModal({ type: "project", data: p })} onDelete={deleteProject} onUpdateProject={upsertProject} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} onAddOutput={o => setModal({ type: "output", data: o })} onEditOutput={o => setModal({ type: "output", data: o })} />}
         {tab === "people" && <PeopleView people={people} projects={projects} deliverables={deliverables} search={search} setSearch={setSearch} onAdd={() => setModal({ type: "person", data: null })} onEdit={p => setModal({ type: "person", data: p })} onDelete={deletePerson} />}
-        {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} />}
+        {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} onUpdateDeliverable={upsertDeliverable} />}
         {tab === "outputs" && <OutputsView outputs={outputs} projects={projects} people={people} onAdd={() => setModal({ type: "output", data: null })} onEdit={o => setModal({ type: "output", data: o })} onDelete={deleteOutput} />}
         {tab === "grants" && <GrantsView grants={grants} people={people} onAdd={() => setModal({ type: "grant", data: null })} onEdit={g => setModal({ type: "grant", data: g })} onDelete={deleteGrant} onConvertToProject={g => { const leadNames = g.leads || (g.lead ? [g.lead] : []); setModal({ type: "project", data: { name: g.title, summary: `Converted from grant: ${g.funder}${g.scheme ? " — "+g.scheme : ""}`, budget: g.amount || 0, status: "In Progress", lead: leadNames, teamMembers: g.teamMembers || [], startDate: new Date().toISOString().slice(0,10), tags: ["Grant"] } }); }} />}
         {tab === "contacts" && <ContactsView contacts={contacts} projects={projects} onAdd={() => setModal({ type: "contact", data: null })} onEdit={c => setModal({ type: "contact", data: c })} onDelete={deleteContact} />}
@@ -2487,74 +2487,168 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
 }
 
 // ── Deliverables View ─────────────────────────────────────────────────────────
-function DeliverablesView({ deliverables, projects, people, search, setSearch, filterStatus, setFilterStatus, onAdd, onEdit, onDelete }) {
+function DeliverablesView({ deliverables, projects, people, search, setSearch, filterStatus, setFilterStatus, onAdd, onEdit, onDelete, onUpdateDeliverable }) {
+  const [bulkSelected, setBulkSelected] = useState({});
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState("Completed");
+  const [projectFilter, setProjectFilter] = useState("All");
+
   const filtered = deliverables.filter(d => {
     const q = search.toLowerCase();
     const proj = projects.find(p => p.id === d.project);
-    const matchSearch = !q || d.name.toLowerCase().includes(q) || (d.description || "").toLowerCase().includes(q) || (proj?.name || "").toLowerCase().includes(q);
+    const matchSearch = !q || d.name.toLowerCase().includes(q) || (d.description||"").toLowerCase().includes(q) || (proj?.name||"").toLowerCase().includes(q);
     const matchStatus = filterStatus === "All" || d.status === filterStatus;
-    return matchSearch && matchStatus;
+    const matchProject = projectFilter === "All" || d.project === projectFilter;
+    return matchSearch && matchStatus && matchProject;
   });
 
   const grouped = {};
   filtered.forEach(d => {
-    const key = d.project || "unassigned";
+    const key = d.project || "__none";
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(d);
   });
+
+  const selectedCount = Object.values(bulkSelected).filter(Boolean).length;
+
+  const applyBulk = async () => {
+    const ids = Object.keys(bulkSelected).filter(id => bulkSelected[id]);
+    for (const id of ids) {
+      const d = deliverables.find(del => del.id === id);
+      if (d && onUpdateDeliverable) await onUpdateDeliverable({ ...d, status: bulkStatus });
+    }
+    setBulkSelected({});
+    setBulkMode(false);
+  };
+
+  const selectAll = () => {
+    const all = {};
+    filtered.forEach(d => { all[d.id] = true; });
+    setBulkSelected(all);
+  };
+
+  const clearAll = () => setBulkSelected({});
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900, fontFamily: "'Barlow Condensed', sans-serif", textTransform: "uppercase", letterSpacing: 1 }}>Deliverables</h1>
-          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14, fontWeight: 500 }}>{filtered.length} total</p>
+          <h1 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Deliverables</h1>
+          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14 }}>{filtered.length} deliverable{filtered.length !== 1 ? "s" : ""}</p>
         </div>
-        <button onClick={onAdd} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 2, padding: "10px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-          Add Deliverable
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setBulkMode(m => !m); setBulkSelected({}); }} style={{ padding: "9px 18px", background: bulkMode ? "#f3f4f6" : "#0f1f3d", color: bulkMode ? "#6b7280" : "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="check" size={13} color={bulkMode ? "#6b7280" : "#fff"} />
+            {bulkMode ? "Cancel Bulk" : "Bulk Edit"}
+          </button>
+          <button onClick={onAdd} style={{ padding: "9px 18px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="plus" size={13} color="#fff" /> Add Deliverable
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search deliverables…" style={{ flex: 1, padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 14, outline: "none", background: "#fff" }} />
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 14, outline: "none", background: "#fff", cursor: "pointer" }}>
-          {["All", "Completed", "In Progress", "Not Started"].map(s => <option key={s}>{s}</option>)}
+      {/* Bulk action bar */}
+      {bulkMode && (
+        <div style={{ background: "#0f1f3d", borderRadius: 3, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>
+            {selectedCount > 0 ? `${selectedCount} selected` : "Select deliverables below"}
+          </span>
+          <button onClick={selectAll} style={{ padding: "5px 12px", background: "rgba(255,255,255,0.1)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Select All ({filtered.length})</button>
+          <button onClick={clearAll} style={{ padding: "5px 12px", background: "rgba(255,255,255,0.1)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Clear</button>
+          {selectedCount > 0 && (
+            <>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>Set status to:</span>
+                <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)} style={{ padding: "6px 12px", borderRadius: 2, border: "none", fontSize: 12, fontWeight: 700, outline: "none", fontFamily: "inherit" }}>
+                  {["Not Started", "In Progress", "Completed", "On Hold", "Blocked"].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <button onClick={applyBulk} style={{ padding: "8px 18px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase" }}>
+                  Apply to {selectedCount}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search deliverables…" style={{ flex: 1, minWidth: 180, padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 14, outline: "none", background: "#fff" }} />
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 13, outline: "none", background: "#fff", cursor: "pointer" }}>
+          {["All", "Not Started", "In Progress", "Completed", "On Hold", "Blocked"].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 13, outline: "none", background: "#fff", cursor: "pointer", maxWidth: 260 }}>
+          <option value="All">All Projects</option>
+          {projects.sort((a,b) => a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name.slice(0,50)}</option>)}
         </select>
       </div>
 
-      {Object.entries(grouped).map(([projId, items]) => {
+      {/* Grouped tables */}
+      {Object.keys(grouped).sort((a, b) => {
+        const pa = projects.find(p => p.id === a)?.name || "";
+        const pb = projects.find(p => p.id === b)?.name || "";
+        return pa.localeCompare(pb);
+      }).map(projId => {
         const proj = projects.find(p => p.id === projId);
+        const dels = grouped[projId];
+        const allSelected = dels.every(d => bulkSelected[d.id]);
         return (
-          <div key={projId} style={{ marginBottom: 24 }}>
-            <div style={{ fontWeight: 800, fontSize: 12, color: "#0f1f3d", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1.2, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14 }}>
-              {proj ? proj.name : "Unassigned"} ({items.length})
+          <div key={projId} style={{ marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              {bulkMode && (
+                <input type="checkbox" checked={allSelected} onChange={() => {
+                  const newSel = { ...bulkSelected };
+                  dels.forEach(d => { newSel[d.id] = !allSelected; });
+                  setBulkSelected(newSel);
+                }} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+              )}
+              <h3 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>
+                {proj?.name || "No Project"} <span style={{ color: "#9ca3af", fontWeight: 500 }}>({dels.length})</span>
+              </h3>
             </div>
-            <div style={{ background: "#fff", borderRadius: 2, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", overflow: "hidden" }}>
+            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e5e7eb", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ background: "#f8fafc", borderBottom: "2px solid #f0f0f0" }}>
+                  <tr style={{ background: "#f8f9fb" }}>
+                    {bulkMode && <th style={{ padding: "10px 14px", width: 40 }}></th>}
                     {["ID", "Description", "Deadline", "Status", "Assigned", "Actions"].map(h => (
-                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
+                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((d, i) => {
-                    const isOverdue = d.deadline && d.status !== "Completed" && new Date(d.deadline) < new Date();
+                  {dels.map((d, i) => {
+                    const today = new Date();
+                    const isOverdue = d.deadline && d.status !== "Completed" && new Date(d.deadline) < today;
+                    const isSelected = bulkSelected[d.id];
                     return (
-                      <tr key={d.id} style={{ borderBottom: i < items.length - 1 ? "1px solid #f5f5f5" : "none" }}>
-                        <td style={{ padding: "11px 14px", fontWeight: 700, fontSize: 13, fontFamily: "'DM Mono', monospace", color: "#1e3a5f" }}>{d.name}</td>
-                        <td style={{ padding: "11px 14px", fontSize: 13, color: "#374151", maxWidth: 300 }}>{d.description}</td>
-                        <td style={{ padding: "11px 14px", fontSize: 12, color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
-                          {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU") : "–"}
-                          {isOverdue && " ⚠"}
+                      <tr key={d.id} onClick={() => bulkMode && setBulkSelected(prev => ({ ...prev, [d.id]: !prev[d.id] }))}
+                        style={{ borderTop: i > 0 ? "1px solid #f0f0f0" : "none", background: isSelected ? "#fef3c7" : isOverdue ? "#fff8f8" : "#fff", cursor: bulkMode ? "pointer" : "default", transition: "background 0.1s" }}>
+                        {bulkMode && (
+                          <td style={{ padding: "10px 14px" }}>
+                            <div style={{ width: 18, height: 18, borderRadius: 3, border: `2px solid ${isSelected ? "#e85d27" : "#dde1e9"}`, background: isSelected ? "#e85d27" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {isSelected && <Icon name="check" size={11} color="#fff" />}
+                            </div>
+                          </td>
+                        )}
+                        <td style={{ padding: "12px 14px", fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#0f1f3d", maxWidth: 160, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</td>
+                        <td style={{ padding: "12px 14px", fontSize: 12, color: "#6b7280", maxWidth: 220, lineHeight: 1.4 }}>{d.description?.slice(0, 80)}{(d.description?.length||0) > 80 ? "…" : ""}</td>
+                        <td style={{ padding: "12px 14px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", color: isOverdue ? "#dc2626" : "#6b7280" }}>
+                          {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU") : "—"}
+                          {isOverdue && <span style={{ marginLeft: 5, fontSize: 10 }}>⚠ Overdue</span>}
                         </td>
-                        <td style={{ padding: "11px 14px" }}><StatusBadge status={d.status} /></td>
-                        <td style={{ padding: "11px 14px", fontSize: 13, color: "#6b7280" }}>{d.assignedTeam || "–"}</td>
-                        <td style={{ padding: "11px 14px" }}>
+                        <td style={{ padding: "12px 14px" }}>
+                          <select value={d.status} onChange={e => { if(onUpdateDeliverable) onUpdateDeliverable({ ...d, status: e.target.value }); }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ padding: "5px 8px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 12, outline: "none", background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+                            {["Not Started","In Progress","Completed","On Hold","Blocked"].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ padding: "12px 14px", fontSize: 12, color: "#6b7280" }}>{d.assignedTeam || "—"}</td>
+                        <td style={{ padding: "12px 14px" }}>
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button onClick={() => onEdit(d)} style={{ padding: "4px 10px", border: "1.5px solid #e5e7eb", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Edit</button>
-                            <button onClick={() => { if (confirm("Delete?")) onDelete(d.id); }} style={{ padding: "4px 8px", border: "1.5px solid #fee2e2", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 12, color: "#dc2626" }}>🗑</button>
+                            <button onClick={e => { e.stopPropagation(); onEdit(d); }} style={{ padding: "5px 12px", border: "1.5px solid #e5e7eb", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#0f1f3d" }}>Edit</button>
+                            <button onClick={e => { e.stopPropagation(); if(confirm("Delete?")) onDelete(d.id); }} style={{ padding: "5px 8px", border: "1.5px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer" }}><Icon name="trash" size={13} color="#dc2626" /></button>
                           </div>
                         </td>
                       </tr>
@@ -2566,11 +2660,16 @@ function DeliverablesView({ deliverables, projects, people, search, setSearch, f
           </div>
         );
       })}
+      {filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>No deliverables match your filters</div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Task Deliverable Row (top-level to avoid hooks-in-nested-fn error) ────────
+
 function TaskDeliverableRow({ d, accent, selectedPerson, projects, today, onEditDeliverable, onUpdateDeliverable }) {
   const proj = projects.find(p => p.id === d.project);
   const isOverdue = d.deadline && d.status !== "Completed" && new Date(d.deadline) < today;
