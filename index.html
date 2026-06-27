@@ -1378,6 +1378,48 @@ function BudgetEntryTable({ title, addLabel, entries, color, onSave }) {
   );
 }
 
+function AssessmentBlock({ type, title, icon, placeholder, aiAssessments, editingType, editText, setEditingType, setEditText, onSave }) {
+    const text = aiAssessments[type];
+    const isEditing = editingType === type;
+    return (
+      <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", marginBottom: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icon name={icon} size={18} color="#0f1f3d" />
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>{title}</span>
+            {text && !isEditing && <span style={{ fontSize: 9, color: "#16a34a", background: "#dcfce7", padding: "2px 7px", borderRadius: 2, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase" }}>Saved</span>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isEditing ? (
+              <>
+                <button onClick={() => onSave(type, editText)} style={{ padding: "7px 16px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase" }}>Save</button>
+                <button onClick={() => setEditingType(null)} style={{ padding: "7px 14px", background: "#fff", color: "#6b7280", border: "1px solid #dde1e9", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase" }}>Cancel</button>
+              </>
+            ) : (
+              <button onClick={() => { setEditingType(type); setEditText(text || ""); }} style={{ padding: "7px 16px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+                <Icon name="edit" size={13} color="#fff" />
+                {text ? "Edit" : "Add"}
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ padding: "18px 20px" }}>
+          {isEditing ? (
+            <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={8}
+              style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.7, color: "#2d3748" }}
+              placeholder={placeholder} autoFocus />
+          ) : text ? (
+            <div style={{ fontSize: 14, color: "#2d3748", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{text}</div>
+          ) : (
+            <div style={{ color: "#b0b8c4", fontSize: 14, fontStyle: "italic", textAlign: "center", padding: "16px 0" }}>
+              Click "Add" to write an assessment — or ask Claude in the chat for a draft, then paste it here
+            </div>
+          )}
+        </div>
+      </div>
+    );
+}
+
 function ProjectDetailPage({ project: initialProject, people, deliverables, outputs: allOutputs, onBack, onEdit, onUpdateProject, onEditDeliverable, onUpdateDeliverable, onAddOutput, onEditOutput }) {
   const p = initialProject;
   const [aiAssessments, setAiAssessments] = useState(p.aiAssessments || {});
@@ -1446,47 +1488,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
     await onUpdateProject({ ...p, aiAssessments: updated, notes });
   };
 
-  const AssessmentBlock = ({ type, title, icon, placeholder }) => {
-    const text = aiAssessments[type];
-    const isEditing = editingType === type;
-    return (
-      <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", marginBottom: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-        <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Icon name={icon} size={18} color="#0f1f3d" />
-            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>{title}</span>
-            {text && !isEditing && <span style={{ fontSize: 9, color: "#16a34a", background: "#dcfce7", padding: "2px 7px", borderRadius: 2, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase" }}>Saved</span>}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {isEditing ? (
-              <>
-                <button onClick={() => saveAssessment(type, editText)} style={{ padding: "7px 16px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase" }}>Save</button>
-                <button onClick={() => setEditingType(null)} style={{ padding: "7px 14px", background: "#fff", color: "#6b7280", border: "1px solid #dde1e9", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase" }}>Cancel</button>
-              </>
-            ) : (
-              <button onClick={() => { setEditingType(type); setEditText(text || ""); }} style={{ padding: "7px 16px", background: "#0f1f3d", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
-                <Icon name="edit" size={13} color="#fff" />
-                {text ? "Edit" : "Add"}
-              </button>
-            )}
-          </div>
-        </div>
-        <div style={{ padding: "18px 20px" }}>
-          {isEditing ? (
-            <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={8}
-              style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.7, color: "#2d3748" }}
-              placeholder={placeholder} autoFocus />
-          ) : text ? (
-            <div style={{ fontSize: 14, color: "#2d3748", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{text}</div>
-          ) : (
-            <div style={{ color: "#b0b8c4", fontSize: 14, fontStyle: "italic", textAlign: "center", padding: "16px 0" }}>
-              Click "Add" to write an assessment — or ask Claude in the chat for a draft, then paste it here
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
+
 
   const projOutputs = (allOutputs || []).filter(o => {
     if (!o.project) return false;
@@ -1896,11 +1898,11 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                 <h2 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 24, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>Assessments</h2>
                 <div style={{ fontSize: 13, color: "#9ca3af", fontWeight: 500 }}>Write or paste assessments for this project</div>
               </div>
-              <AssessmentBlock type="summary" title="Project Summary" icon="info" placeholder="Write a 3-4 sentence summary of what this project aims to achieve, how it does it, and why it matters…" />
-              <AssessmentBlock type="risk" title="Risk Assessment" icon="alert" placeholder="List key risks for this project, e.g.:
+              <AssessmentBlock aiAssessments={aiAssessments} editingType={editingType} editText={editText} setEditingType={setEditingType} setEditText={setEditText} onSave={saveAssessment} type="summary" title="Project Summary" icon="info" placeholder="Write a 3-4 sentence summary of what this project aims to achieve, how it does it, and why it matters…" />
+              <AssessmentBlock aiAssessments={aiAssessments} editingType={editingType} editText={editText} setEditingType={setEditingType} setEditText={setEditText} onSave={saveAssessment} type="risk" title="Risk Assessment" icon="alert" placeholder="List key risks for this project, e.g.:
 • Data availability may delay analysis
 • Stakeholder coordination across agencies…" />
-              <AssessmentBlock type="for" title="Fields of Research (FoR) Codes" icon="theme" placeholder="List relevant ANZSRC FoR codes, e.g.:
+              <AssessmentBlock aiAssessments={aiAssessments} editingType={editingType} editText={editText} setEditingType={setEditingType} setEditText={setEditText} onSave={saveAssessment} type="for" title="Fields of Research (FoR) Codes" icon="theme" placeholder="List relevant ANZSRC FoR codes, e.g.:
 • 0502 Environmental Science and Management
 • 0501 Ecological Applications…" />
             </div>
@@ -2189,52 +2191,22 @@ function PersonProfilePage({ person: p, people, projects, deliverables, onBack, 
   );
 }
 
-function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, onEdit, onDelete }) {
-  const [roleFilter, setRoleFilter] = useState("All");
-  const [themeFilter, setThemeFilter] = useState("All");
-  const [leaveFilter, setLeaveFilter] = useState("All");
-  const [sortMode, setSortMode] = useState("leadership");
-  const [selectedPerson, setSelectedPerson] = useState(null);
-  const [profilePerson, setProfilePerson] = useState(null);
+function SectionHeading({ label, count, color }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, marginTop: 4 }}>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 20, textTransform: "uppercase", letterSpacing: 1, color: "#0f1f3d" }}>{label}</div>
+      <div style={{ background: color + "18", color, borderRadius: 99, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>{count}</div>
+      <div style={{ flex: 1, height: 1, background: "#e8eaed" }} />
+    </div>
+  )}
 
-  const STUDENT_ROLES = ["PhD Candidate", "Masters Student"];
-  const LEADERSHIP_ORDER = ["Team Leader", "Professor", "Associate Professor", "Senior Research Fellow", "Research Fellow", "Senior Honorary Fellow", "Environmental Risk Analyst", "Research Officer", "Senior Scientific Software Dev", "Scientific Software Developer", "Administrative Assistant", "Research Assistant", "PhD Candidate", "Masters Student"];
-
-  const roleGroups = ["All", "Team Leader", "Professor", "Associate Professor", "Senior Research Fellow", "Research Fellow", "Senior Honorary Fellow", "Research Officer", "Research Assistant", "PhD Candidate", "Masters Student", "Environmental Risk Analyst", "Senior Scientific Software Dev", "Scientific Software Developer", "Administrative Assistant"];
-
-  const isStudent = (p) => {
-    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
-    return roles.some(r => STUDENT_ROLES.includes(r));
-  };
-
-  const getRoleRank = (p) => {
-    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
-    return Math.min(...roles.map(r => { const idx = LEADERSHIP_ORDER.indexOf(r); return idx === -1 ? 99 : idx; }));
-  };
-
-  const filtered = people.filter(p => {
-    const q = search.toLowerCase();
-    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
-    const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.email || "").toLowerCase().includes(q) || roles.some(r => r.toLowerCase().includes(q));
-    const matchRole = roleFilter === "All" || roles.includes(roleFilter);
-    const matchTheme = themeFilter === "All" || (p.themes || []).includes(themeFilter);
-    const matchLeave = leaveFilter === "All" || (leaveFilter === "On Leave" ? !!p.leaveType : !p.leaveType);
-    return matchSearch && matchRole && matchTheme && matchLeave;
-  });
-
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortMode === "alpha") return a.name.localeCompare(b.name);
-    return getRoleRank(a) - getRoleRank(b) || a.name.localeCompare(b.name);
-  });
-
-  const staff = sorted.filter(p => !isStudent(p));
-  const students = sorted.filter(p => isStudent(p));
-
-  const totalFTE = people.reduce((s, p) => s + (parseFloat(p.availability) || 0), 0);
-  const staffFTE = people.filter(p => !isStudent(p)).reduce((s, p) => s + (parseFloat(p.availability) || 0), 0);
-  const studentCount = people.filter(p => isStudent(p)).length;
-
-  const PersonCard = ({ p }) => {
+function PersonCard({ p, projects, deliverables, onSelect }) {
+    const primaryRole = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
+    const allRoles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
+    const roleColor = ROLE_COLORS[primaryRole] || "#6b7280";
+    const projCount = projects.filter(pr => getLeads(pr).includes(p.name)).length;
+    const assignedDels = deliverables.filter(d => (d.assignedTeam === p.name || d.teamLead === p.name) && d.status !== "Completed");
+    const overdueDels = assignedDels.filter(d => d.deadline && new Date(d.deadline) < new Date());
+    const themes = (p.themes || []).map(tid => RESEARCH_THEMES.find(t => t.id === tid)).filter(Boolean);
     const primaryRole = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
     const allRoles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
     const roleColor = ROLE_COLORS[primaryRole] || "#6b7280";
@@ -2244,7 +2216,7 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
     const themes = (p.themes || []).map(tid => RESEARCH_THEMES.find(t => t.id === tid)).filter(Boolean);
 
     return (
-      <div onClick={() => setProfilePerson(p)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden", transition: "box-shadow 0.15s", cursor: "pointer" }}
+      <div onClick={() => onSelect(p)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden", transition: "box-shadow 0.15s", cursor: "pointer" }}
         onMouseEnter={e => e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.1)"}
         onMouseLeave={e => e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)"}>
         <div style={{ height: 5, background: roleColor }} />
@@ -2339,7 +2311,7 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
           )}
 
           <div style={{ display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
-            <button onClick={() => setProfilePerson(p)} style={{ flex: 1, padding: "8px", border: "1.5px solid #e85d27", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "#e85d27", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            <button onClick={() => onSelect(p)} style={{ flex: 1, padding: "8px", border: "1.5px solid #e85d27", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "#e85d27", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
               <Icon name="people" size={13} color="#e85d27" /> View Profile
             </button>
             <button onClick={() => onEdit(p)} style={{ padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
@@ -2352,7 +2324,54 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
         </div>
       </div>
     );
+}
+
+function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, onEdit, onDelete }) {
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [themeFilter, setThemeFilter] = useState("All");
+  const [leaveFilter, setLeaveFilter] = useState("All");
+  const [sortMode, setSortMode] = useState("leadership");
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [profilePerson, setProfilePerson] = useState(null);
+
+  const STUDENT_ROLES = ["PhD Candidate", "Masters Student"];
+  const LEADERSHIP_ORDER = ["Team Leader", "Professor", "Associate Professor", "Senior Research Fellow", "Research Fellow", "Senior Honorary Fellow", "Environmental Risk Analyst", "Research Officer", "Senior Scientific Software Dev", "Scientific Software Developer", "Administrative Assistant", "Research Assistant", "PhD Candidate", "Masters Student"];
+
+  const roleGroups = ["All", "Team Leader", "Professor", "Associate Professor", "Senior Research Fellow", "Research Fellow", "Senior Honorary Fellow", "Research Officer", "Research Assistant", "PhD Candidate", "Masters Student", "Environmental Risk Analyst", "Senior Scientific Software Dev", "Scientific Software Developer", "Administrative Assistant"];
+
+  const isStudent = (p) => {
+    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
+    return roles.some(r => STUDENT_ROLES.includes(r));
   };
+
+  const getRoleRank = (p) => {
+    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
+    return Math.min(...roles.map(r => { const idx = LEADERSHIP_ORDER.indexOf(r); return idx === -1 ? 99 : idx; }));
+  };
+
+  const filtered = people.filter(p => {
+    const q = search.toLowerCase();
+    const roles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
+    const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.email || "").toLowerCase().includes(q) || roles.some(r => r.toLowerCase().includes(q));
+    const matchRole = roleFilter === "All" || roles.includes(roleFilter);
+    const matchTheme = themeFilter === "All" || (p.themes || []).includes(themeFilter);
+    const matchLeave = leaveFilter === "All" || (leaveFilter === "On Leave" ? !!p.leaveType : !p.leaveType);
+    return matchSearch && matchRole && matchTheme && matchLeave;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortMode === "alpha") return a.name.localeCompare(b.name);
+    return getRoleRank(a) - getRoleRank(b) || a.name.localeCompare(b.name);
+  });
+
+  const staff = sorted.filter(p => !isStudent(p));
+  const students = sorted.filter(p => isStudent(p));
+
+  const totalFTE = people.reduce((s, p) => s + (parseFloat(p.availability) || 0), 0);
+  const staffFTE = people.filter(p => !isStudent(p)).reduce((s, p) => s + (parseFloat(p.availability) || 0), 0);
+  const studentCount = people.filter(p => isStudent(p)).length;
+
+
 
   // Show profile page if a person is clicked
   if (profilePerson) {
@@ -2364,13 +2383,6 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
     />;
   }
 
-  const SectionHeading = ({ label, count, color }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, marginTop: 4 }}>
-      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 20, textTransform: "uppercase", letterSpacing: 1, color: "#0f1f3d" }}>{label}</div>
-      <div style={{ background: color + "18", color, borderRadius: 99, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>{count}</div>
-      <div style={{ flex: 1, height: 1, background: "#e8eaed" }} />
-    </div>
-  );
 
   return (
     <div>
@@ -2877,34 +2889,9 @@ function PinGate({ onUnlock }) {
 }
 
 // ── Management View ───────────────────────────────────────────────────────────
-function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
-  const [sources, setSources] = useState(allocation.sources || []);
-  const [contracts, setContracts] = useState(allocation.contracts || []);
-  const [notes, setNotes] = useState(allocation.notes || "");
-  const [activeTab, setActiveTab] = useState("current");
-
-  const addSource = () => setSources(s => [...s, { projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
-  const updateSource = (i, field, val) => setSources(s => s.map((src, idx) => idx === i ? { ...src, [field]: val } : src));
-  const removeSource = (i) => setSources(s => s.filter((_, idx) => idx !== i));
-
-  const addContract = () => setContracts(c => [...c, { id: "c"+Date.now(), projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
-  const updateContract = (i, field, val) => setContracts(c => c.map((con, idx) => idx === i ? { ...con, [field]: val } : con));
-  const removeContract = (i) => setContracts(c => c.filter((_, idx) => idx !== i));
-
-  const totalFTE = sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
-  const available = parseFloat(person.availability) || 0;
-  const today = new Date();
-
-  const expiringWarning = sources.filter(src => {
-    if (!src.endDate) return false;
-    const diff = (new Date(src.endDate) - today) / 86400000;
-    return diff >= 0 && diff <= 60;
-  });
-  const expiredSources = sources.filter(src => src.endDate && new Date(src.endDate) < today);
-
-  const SourceRow = ({ src, i, isContract }) => {
-    const update = isContract ? (f, v) => updateContract(i, f, v) : (f, v) => updateSource(i, f, v);
-    const remove = isContract ? () => removeContract(i) : () => removeSource(i);
+function SourceRow({ src, i, isContract, onUpdate, onRemove, today, projects }) {
+    const update = (f, v) => onUpdate(i, f, v);
+    const remove = () => onRemove(i);
     const endDiff = src.endDate ? Math.round((new Date(src.endDate) - today) / 86400000) : null;
     const isExpired = endDiff !== null && endDiff < 0;
     const isExpiring = endDiff !== null && endDiff >= 0 && endDiff <= 60;
@@ -2920,7 +2907,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
           <select value={src.projectId} onChange={e => update("projectId", e.target.value)}
             style={{ flex: 2, minWidth: 160, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: "#fff" }}>
             <option value="">— Select project or source —</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name?.slice(0,50)}</option>)}
+            {(projects||[]).map(p => <option key={p.id} value={p.id}>{p.name?.slice(0,50)}</option>)}
             <option value="__university">University base salary</option>
             <option value="__scholarship">Scholarship</option>
             <option value="__fellowship">Fellowship</option>
@@ -2952,7 +2939,34 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
         </div>
       </div>
     );
-  };
+}
+
+function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
+  const [sources, setSources] = useState(allocation.sources || []);
+  const [contracts, setContracts] = useState(allocation.contracts || []);
+  const [notes, setNotes] = useState(allocation.notes || "");
+  const [activeTab, setActiveTab] = useState("current");
+
+  const addSource = () => setSources(s => [...s, { projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
+  const updateSource = (i, field, val) => setSources(s => s.map((src, idx) => idx === i ? { ...src, [field]: val } : src));
+  const removeSource = (i) => setSources(s => s.filter((_, idx) => idx !== i));
+
+  const addContract = () => setContracts(c => [...c, { id: "c"+Date.now(), projectId: "", source: "", fte: 0, startDate: "", endDate: "", notes: "" }]);
+  const updateContract = (i, field, val) => setContracts(c => c.map((con, idx) => idx === i ? { ...con, [field]: val } : con));
+  const removeContract = (i) => setContracts(c => c.filter((_, idx) => idx !== i));
+
+  const totalFTE = sources.reduce((s, src) => s + (parseFloat(src.fte)||0), 0);
+  const available = parseFloat(person.availability) || 0;
+  const today = new Date();
+
+  const expiringWarning = sources.filter(src => {
+    if (!src.endDate) return false;
+    const diff = (new Date(src.endDate) - today) / 86400000;
+    return diff >= 0 && diff <= 60;
+  });
+  const expiredSources = sources.filter(src => src.endDate && new Date(src.endDate) < today);
+
+
 
   return (
     <div style={{ background: "#f8f9fb", borderRadius: 3, padding: 14, border: "1px solid #e2e5ea" }}>
@@ -2971,7 +2985,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
               {expiringWarning.length} contract{expiringWarning.length > 1 ? "s" : ""} expiring within 60 days
             </div>
           )}
-          {sources.map((src, i) => <SourceRow key={i} src={src} i={i} isContract={false} />)}
+          {sources.map((src, i) => <SourceRow key={i} src={src} i={i} isContract={false} onUpdate={updateSource} onRemove={removeSource} today={today} projects={projects} />)}
           <button onClick={addSource} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
             <Icon name="plus" size={13} color="#6b7280" /> Add current allocation
           </button>
@@ -2986,7 +3000,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
         <div>
           <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10 }}>Log all past and upcoming contracts — useful for tracking funding continuity over time.</div>
           {contracts.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af", fontStyle: "italic", marginBottom: 10 }}>No contract history recorded yet.</div>}
-          {contracts.map((con, i) => <SourceRow key={con.id||i} src={con} i={i} isContract={true} />)}
+          {contracts.map((con, i) => <SourceRow key={con.id||i} src={con} i={i} isContract={true} onUpdate={updateContract} onRemove={removeContract} today={today} projects={projects} />)}
           <button onClick={addContract} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", border: "1.5px dashed #dde1e9", borderRadius: 3, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10 }}>
             <Icon name="plus" size={13} color="#6b7280" /> Add contract
           </button>
