@@ -1165,11 +1165,14 @@ function ProjectsView({ projects, people, deliverables, outputs, search, setSear
         project={projects.find(p => p.id === selectedProject.id) || selectedProject}
         people={people}
         deliverables={deliverables}
+        outputs={outputs}
         onBack={() => setSelectedProject(null)}
         onEdit={p => { onEdit(p); }}
         onUpdateProject={onUpdateProject}
         onEditDeliverable={onEditDeliverable}
         onUpdateDeliverable={onUpdateDeliverable}
+        onAddOutput={onAddOutput}
+        onEditOutput={onEditOutput}
       />
     );
   }
@@ -1595,13 +1598,22 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
           {/* DELIVERABLES */}
           {activeSection === "deliverables" && (
             <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-              <div style={{ padding: "16px 22px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>Deliverables</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>{done}/{projDels.length} complete</span>
-                  {onEditDeliverable && <button onClick={() => onEditDeliverable({ project: p.id, status: "Not Started", name: "", description: "", deadline: "", assignedTeam: "", teamLead: "" })} style={{ padding: "6px 14px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}><Icon name="plus" size={13} color="#fff" />Add</button>}
-                </div>
-              </div>
+              {(() => {
+                const [showCompleted, setShowCompleted] = React.useState(true);
+                const visibleDels = showCompleted ? projDels : projDels.filter(d => d.status !== "Completed");
+                return (
+                  <>
+                  <div style={{ padding: "14px 22px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>Deliverables</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>{done}/{projDels.length} complete</span>
+                      <button onClick={() => setShowCompleted(s => !s)} style={{ padding: "5px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, background: showCompleted ? "#f0fdf4" : "#fff", color: showCompleted ? "#16a34a" : "#6b7280", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 }}>
+                        <Icon name="check" size={12} color={showCompleted ? "#16a34a" : "#9ca3af"} />
+                        {showCompleted ? "Hiding none" : `${done} completed hidden`}
+                      </button>
+                      {onEditDeliverable && <button onClick={() => onEditDeliverable({ project: p.id, status: "Not Started", name: "", description: "", deadline: "", assignedTeam: "", teamLead: "" })} style={{ padding: "6px 14px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}><Icon name="plus" size={13} color="#fff" />Add</button>}
+                    </div>
+                  </div>
               {projDels.length === 0
                 ? <div style={{ padding: 28, textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No deliverables for this project yet</div>
                 : <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1613,7 +1625,7 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                       </tr>
                     </thead>
                     <tbody>
-                      {[...projDels].sort((a,b) => ({"In Progress":0,"Not Started":1,"Completed":2}[a.status]??1)-({"In Progress":0,"Not Started":1,"Completed":2}[b.status]??1)).map((d, i) => {
+                      {[...visibleDels].sort((a,b) => ({"In Progress":0,"Not Started":1,"Completed":2}[a.status]??1)-({"In Progress":0,"Not Started":1,"Completed":2}[b.status]??1)).map((d, i) => {
                         const isOverdue = d.deadline && d.status !== "Completed" && new Date(d.deadline) < new Date();
                         const dot = {"Completed":"#22c55e","In Progress":"#3b82f6","Not Started":"#d1d5db"}[d.status]||"#d1d5db";
                         return (
@@ -1642,6 +1654,9 @@ function ProjectDetailPage({ project: initialProject, people, deliverables, outp
                     </tbody>
                   </table>
               }
+              </>
+              );
+            })()}
             </div>
           )}
 
