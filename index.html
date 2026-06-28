@@ -3695,7 +3695,10 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
                                   <div style={{ background: isExpired ? "#fca5a5" : "#e85d2718", borderRadius: 2, padding: "2px 7px", flexShrink: 0 }}>
                                     <span style={{ fontSize: 11, fontWeight: 800, color: isExpired ? "#dc2626" : "#e85d27" }}>{src.fte} FTE</span>
                                   </div>
-                                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600, flex: 1 }}>{src.source || (proj?.name?.slice(0,40)) || "—"}</span>
+                                  <span style={{ fontSize: 12, color: "#374151", fontWeight: 600, flex: 1 }}>{src.source || (proj?.name?.slice(0,40)) || (() => {
+                                    const SOURCE_LABELS = { "__school_permanent": "School-funded — Permanent Position", "__university": "University base salary", "__fellowship": "Fellowship / ECR", "__scholarship_rtp": "Scholarship — RTP", "__scholarship_mq": "Scholarship — MQ", "__scholarship_other": "Scholarship — Other", "__other": "Other" };
+                                    return SOURCE_LABELS[src.projectId] || src.projectId || "—";
+                                  })()}</span>
                                   {src.endDate && (
                                     <span style={{ fontSize: 11, fontWeight: 700, color: isExpired ? "#dc2626" : isExpiring ? "#d97706" : "#9ca3af", whiteSpace: "nowrap" }}>
                                       {isExpired ? `Ended ${Math.abs(endDiff)}d ago` : isExpiring ? `Expires ${endDiff}d` : `Until ${new Date(src.endDate).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"})}`}
