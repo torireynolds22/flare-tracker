@@ -869,7 +869,7 @@ function App() {
 
       {/* Modals */}
       {modal?.type === "project" && <ProjectModal data={modal.data} people={people} onSave={upsertProject} onClose={() => setModal(null)} />}
-      {modal?.type === "person" && <PersonModal data={modal.data} onSave={upsertPerson} onClose={() => setModal(null)} />}
+      {modal?.type === "person" && <PersonModal data={modal.data} people={people} onSave={upsertPerson} onClose={() => setModal(null)} />}
       {modal?.type === "deliverable" && <DeliverableModal data={modal.data} projects={projects} people={people} onSave={upsertDeliverable} onClose={() => setModal(null)} />}
       {modal?.type === "output" && <OutputModal data={modal.data} projects={projects} people={people} onSave={upsertOutput} onClose={() => setModal(null)} />}
       {modal?.type === "grant" && <GrantModal data={modal.data} people={people} onSave={upsertGrant} onClose={() => setModal(null)} />}
@@ -5297,7 +5297,7 @@ function ProjectModal({ data, people, onSave, onClose }) {
   );
 }
 
-function PersonModal({ data, onSave, onClose }) {
+function PersonModal({ data, people, onSave, onClose }) {
   const [form, setForm] = useState({
     id: data?.id || "", name: data?.name || "", email: data?.email || "",
     roles: data?.roles || (data?.role ? [data.role] : ["Research Fellow"]),
