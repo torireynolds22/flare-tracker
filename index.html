@@ -2015,6 +2015,16 @@ function PersonProfilePage({ person: p, people, projects, deliverables, onBack, 
     return !(start && now < start) && !(end && now > end);
   })();
 
+  // Supervision — explicit HR and project supervisor fields
+  const STUDENT_ROLES_PP = ["PhD Candidate", "Masters Student"];
+  const hrReports = people.filter(m => m.hrSupervisor === p.name && m.id !== p.id);
+  const projectSupervised = people.filter(m => (m.projectSupervisors||[]).includes(p.name) && m.id !== p.id);
+  const _supMap = new Map();
+  [...hrReports, ...projectSupervised].forEach(m => _supMap.set(m.id, m));
+  const supervisedPeople = [..._supMap.values()];
+  const supervisedStudents = projectSupervised.filter(m => STUDENT_ROLES_PP.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
+  const supervisedStaff = supervisedPeople.filter(m => !STUDENT_ROLES_PP.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
+
   return (
     <div style={{ animation: "fadeIn 0.2s ease" }}>
       {/* Top bar */}
