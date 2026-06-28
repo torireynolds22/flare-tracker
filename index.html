@@ -902,7 +902,7 @@ function Dashboard({ projects, people, deliverables, setTab, onEditDeliverable, 
     .slice(0, 6);
 
   // Overloaded people: 3+ overdue items
-  const peopleLoad = people.map(person => {
+  const peopleLoad = people.filter(p => !p.memberStatus || p.memberStatus === "active").map(person => {
     const myOverdue = overdueList.filter(d => d.assignedTeam === person.name || d.teamLead === person.name);
     const myActive = deliverables.filter(d => (d.assignedTeam === person.name || d.teamLead === person.name) && d.status !== "Completed");
     return { ...person, overdueCount: myOverdue.length, activeCount: myActive.length };
@@ -926,7 +926,7 @@ function Dashboard({ projects, people, deliverables, setTab, onEditDeliverable, 
     { label: "Active Projects", value: inProgress, sub: `of ${projects.length} total`, icon: "projects", color: "#2563eb" },
     { label: "Deliverables Done", value: completed, sub: `of ${deliverables.length} total`, icon: "deliverables", color: "#16a34a" },
     { label: "Overdue", value: overdue, sub: "need attention", icon: "alert", color: "#dc2626", onClick: () => setTab("deliverables") },
-    { label: "Team Size", value: people.filter(p => p.active !== false).length, sub: "active members", icon: "people", color: "#7c3aed", onClick: () => setTab("people") },
+    { label: "Team Size", value: people.filter(p => !p.memberStatus || p.memberStatus === "active").length, sub: "active members", icon: "people", color: "#7c3aed", onClick: () => setTab("people") },
   ];
 
   const [bulkMode, setBulkMode] = useState(false);
@@ -2427,6 +2427,50 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
           <div style={{ fontSize: 16, fontWeight: 600 }}>No people match your filters</div>
         </div>
       )}
+
+
+      {/* Former Members */}
+      {(() => {
+        const former = people.filter(p => p.memberStatus === "available" || p.memberStatus === "inactive");
+        if (former.length === 0) return null;
+        return (
+          <div style={{ marginTop: 32 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.8, color: "#6b7280" }}>Former Members</h2>
+              <div style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: 99, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>{former.length}</div>
+              <div style={{ flex: 1, height: 1, background: "#e8eaed" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+              {former.map(p => {
+                const role = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
+                const rc = ROLE_COLORS[role] || "#6b7280";
+                const isAvailable = p.memberStatus === "available";
+                return (
+                  <div key={p.id} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", opacity: 0.85 }}>
+                    <div style={{ height: 4, background: isAvailable ? "#2563eb" : "#e5e7eb" }} />
+                    <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 44, height: 44, borderRadius: "50%", background: rc + "20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: rc, flexShrink: 0, overflow: "hidden" }}>
+                        {p.photoUrl ? <img src={p.photoUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : p.name.charAt(0)}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af" }}>{role}</div>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: isAvailable ? "#2563eb" : "#9ca3af", background: isAvailable ? "#dbeafe" : "#f3f4f6", padding: "2px 8px", borderRadius: 99, marginTop: 4, display: "inline-block" }}>
+                          {isAvailable ? "● Available" : "● Inactive"}
+                        </span>
+                      </div>
+                      <button onClick={() => onEdit(p)} style={{ padding: "5px 8px", border: "1px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", flexShrink: 0 }}>
+                        <Icon name="edit" size={13} color="#6b7280" />
+                      </button>
+                    </div>
+                    {p.notes && <div style={{ padding: "0 16px 12px", fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>{p.notes.slice(0, 80)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3742,45 +3786,174 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
       })()}
 
       {/* ── People Report ── */}
-      {mgmtTab === "peoplereport" && (
+            {mgmtTab === "peoplereport" && (
         <div>
+          {/* Summary stats */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
             {[
-              { label: "Total Staff", value: people.filter(p => !["PhD Candidate","Masters Student"].some(r => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(r))).length, color: "#0f1f3d" },
+              { label: "Total Staff", value: people.filter(p => !["PhD Candidate","Masters Student"].some(r => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(r)) && (!p.memberStatus||p.memberStatus==="active")).length, color: "#0f1f3d" },
               { label: "Total Students", value: people.filter(p => ["PhD Candidate","Masters Student"].some(r => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(r))).length, color: "#7c3aed" },
-              { label: "Total FTE", value: people.reduce((s,p) => s+(parseFloat(p.availability)||0), 0).toFixed(1), color: "#e85d27" },
-              { label: "Currently Away", value: people.filter(p => p.leaveType).length, color: "#d97706" },
+              { label: "Total FTE", value: people.filter(p => !p.memberStatus||p.memberStatus==="active").reduce((s,p)=>s+(parseFloat(p.availability)||0),0).toFixed(1), color: "#e85d27" },
+              { label: "Currently Away", value: people.filter(p => { if(!p.leaveType) return false; const now=new Date(); const s=p.leaveStart?new Date(p.leaveStart):null; const e=p.leaveEnd?new Date(p.leaveEnd):null; return !(s&&now<s)&&!(e&&now>e); }).length, color: "#d97706" },
             ].map(s => (
-              <div key={s.label} style={{ background: "#fff", borderRadius: 3, padding: "18px", border: "1px solid #e2e5ea", borderBottom: "3px solid " + s.color }}>
-                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 32, fontWeight: 900, color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 2 }}>{s.label}</div>
+              <div key={s.label} style={{ background:"#fff", borderRadius:3, padding:"18px 20px", border:"1px solid #e2e5ea", borderBottom:`3px solid ${s.color}` }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:32, fontWeight:900, color:s.color }}>{s.value}</div>
+                <div style={{ fontSize:11, color:"#9ca3af", fontWeight:700, textTransform:"uppercase", letterSpacing:0.8, marginTop:3 }}>{s.label}</div>
               </div>
             ))}
           </div>
 
-          {/* Role breakdown */}
-          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", marginBottom: 20 }}>
-            <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed" }}>
-              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 17, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>Team by Role</span>
+          {/* Supervision load — who supervises whom */}
+          <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden", marginBottom:20 }}>
+            <div style={{ padding:"16px 20px", background:"#f8f9fb", borderBottom:"2px solid #e8eaed", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:18, textTransform:"uppercase", letterSpacing:0.8, color:"#0f1f3d" }}>Supervision Load</div>
+              <div style={{ fontSize:12, color:"#9ca3af" }}>Based on project co-leads and team membership — edit via each person's profile</div>
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#fafbfc" }}>{["Role","Count","FTE","Projects Led","Active Tasks","Overdue"].map(h=><th key={h} style={{ padding:"10px 16px",textAlign:"left",fontSize:10,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1 }}>{h}</th>)}</tr></thead>
+            <div style={{ padding:"0" }}>
+              {(() => {
+                // For each person, calculate who they're supervising:
+                // - PhD/Masters students on their projects (where person is lead)
+                // - RAs on their projects (where person is lead)
+                const STUDENT_ROLES = ["PhD Candidate","Masters Student"];
+                const RA_ROLES = ["Research Assistant","Research Officer"];
+
+                const supervisors = people
+                  .filter(p => !STUDENT_ROLES.some(r => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(r)))
+                  .filter(p => !p.memberStatus || p.memberStatus === "active")
+                  .map(person => {
+                    // Projects where this person is lead or co-lead
+                    const ledProjects = projects.filter(pr => getLeads(pr).includes(person.name) || (pr.teamMembers||[]).includes(person.name));
+                    
+                    // Find students and RAs on those projects
+                    const supervised = new Set();
+                    ledProjects.forEach(pr => {
+                      const teamNames = [...getLeads(pr), ...(pr.teamMembers||[])].filter(n => n !== person.name);
+                      teamNames.forEach(name => {
+                        const member = people.find(p => p.name === name);
+                        if (member) supervised.add(member);
+                      });
+                      // Also check deliverable assignees
+                      deliverables.filter(d => d.project === pr.id).forEach(d => {
+                        if (d.assignedTeam && d.assignedTeam !== person.name) {
+                          const m = people.find(p => p.name === d.assignedTeam);
+                          if (m) supervised.add(m);
+                        }
+                      });
+                    });
+
+                    const supervisedArr = [...supervised];
+                    const students = supervisedArr.filter(m => STUDENT_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
+                    const ras = supervisedArr.filter(m => RA_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
+                    const staff = supervisedArr.filter(m => !STUDENT_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)) && !RA_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
+                    const totalLoad = students.length * 1 + ras.length * 0.5;
+
+                    return { person, students, ras, staff, supervisedArr, ledProjects, totalLoad };
+                  })
+                  .filter(s => s.supervisedArr.length > 0 || s.ledProjects.length > 0)
+                  .sort((a,b) => b.totalLoad - a.totalLoad || b.supervisedArr.length - a.supervisedArr.length);
+
+                const maxLoad = supervisors.length > 0 ? Math.max(...supervisors.map(s => s.totalLoad)) : 1;
+
+                return supervisors.map((s, idx) => {
+                  const role = Array.isArray(s.person.roles) ? s.person.roles[0] : (s.person.role||"");
+                  const rc = ROLE_COLORS[role] || "#6b7280";
+                  const loadPct = maxLoad > 0 ? (s.totalLoad / maxLoad) * 100 : 0;
+                  const isHeavy = s.totalLoad >= maxLoad * 0.7;
+                  return (
+                    <div key={s.person.id} style={{ padding:"16px 20px", borderBottom: idx < supervisors.length-1 ? "1px solid #f5f5f5" : "none", display:"flex", gap:16, alignItems:"flex-start" }}>
+                      {/* Person */}
+                      <div style={{ display:"flex", alignItems:"center", gap:10, width:200, flexShrink:0 }}>
+                        <div style={{ width:38, height:38, borderRadius:"50%", background:rc+"20", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:14, color:rc, overflow:"hidden", flexShrink:0, border:`2px solid ${rc}33` }}>
+                          {s.person.photoUrl ? <img src={s.person.photoUrl} alt={s.person.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : s.person.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#0f1f3d" }}>{s.person.name}</div>
+                          <div style={{ fontSize:10, color:"#9ca3af" }}>{role}</div>
+                        </div>
+                      </div>
+
+                      {/* Load bar */}
+                      <div style={{ width:120, flexShrink:0 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#9ca3af", marginBottom:4 }}>
+                          <span>Load</span>
+                          <span style={{ fontWeight:700, color: isHeavy ? "#dc2626" : "#6b7280" }}>{s.totalLoad.toFixed(1)}</span>
+                        </div>
+                        <div style={{ background:"#f0f2f5", borderRadius:99, height:7, overflow:"hidden" }}>
+                          <div style={{ width:loadPct+"%", height:"100%", background: isHeavy ? "#dc2626" : "#e85d27", borderRadius:99, transition:"width 0.3s" }} />
+                        </div>
+                        <div style={{ fontSize:10, color:"#9ca3af", marginTop:3 }}>{s.ledProjects.length} project{s.ledProjects.length!==1?"s":""}</div>
+                      </div>
+
+                      {/* Supervised people */}
+                      <div style={{ flex:1, display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-start" }}>
+                        {s.students.length > 0 && (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>Students ({s.students.length})</div>
+                            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                              {s.students.map(m => (
+                                <span key={m.id} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", padding:"2px 8px", borderRadius:99, fontWeight:600, border:"1px solid #e9d5ff" }}>{m.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {s.ras.length > 0 && (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:"#e85d27", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>RAs / Officers ({s.ras.length})</div>
+                            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                              {s.ras.map(m => (
+                                <span key={m.id} style={{ fontSize:11, color:"#e85d27", background:"#fff7f5", padding:"2px 8px", borderRadius:99, fontWeight:600, border:"1px solid #fed7aa" }}>{m.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {s.staff.length > 0 && (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:"#2563eb", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>Staff ({s.staff.length})</div>
+                            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                              {s.staff.map(m => (
+                                <span key={m.id} style={{ fontSize:11, color:"#2563eb", background:"#eff6ff", padding:"2px 8px", borderRadius:99, fontWeight:600, border:"1px solid #bfdbfe" }}>{m.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+
+          {/* Role breakdown table */}
+          <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden", marginBottom:20 }}>
+            <div style={{ padding:"16px 20px", background:"#f8f9fb", borderBottom:"2px solid #e8eaed" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:18, textTransform:"uppercase", letterSpacing:0.8, color:"#0f1f3d" }}>Team by Role</div>
+            </div>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"#f8f9fb" }}>
+                  {["Role","Count","FTE","Projects Led","Active Tasks","Overdue"].map(h=>(
+                    <th key={h} style={{ padding:"12px 16px", textAlign:"left", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Research Assistant","Administrative Assistant","PhD Candidate","Masters Student"].map(role => {
-                  const members = people.filter(p => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(role));
+                  const members = people.filter(p => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(role) && (!p.memberStatus||p.memberStatus==="active"));
                   if (members.length === 0) return null;
                   const fte = members.reduce((s,p)=>s+(parseFloat(p.availability)||0),0);
-                  const led = members.reduce((s,p)=>s+projects.filter(pr=>pr.lead===p.name).length,0);
-                  const active = members.reduce((s,p)=>s+deliverables.filter(d=>(d.assignedTeam===p.name||d.teamLead===p.name)&&d.status!=="Completed").length,0);
-                  const overdue = members.reduce((s,p)=>s+deliverables.filter(d=>(d.assignedTeam===p.name||d.teamLead===p.name)&&d.deadline&&d.status!=="Completed"&&new Date(d.deadline)<today).length,0);
+                  const led = members.reduce((s,p)=>s+projects.filter(pr=>getLeads(pr).includes(p.name)).length,0);
+                  const tasks = members.reduce((s,p)=>s+deliverables.filter(d=>(d.assignedTeam===p.name||d.teamLead===p.name)&&d.status!=="Completed").length,0);
+                  const overdue = members.reduce((s,p)=>s+deliverables.filter(d=>(d.assignedTeam===p.name||d.teamLead===p.name)&&d.status!=="Completed"&&d.deadline&&new Date(d.deadline)<new Date()).length,0);
+                  const rc = ROLE_COLORS[role]||"#6b7280";
                   return (
-                    <tr key={role} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                      <td style={{ padding:"11px 16px" }}><span style={{ fontSize:12,fontWeight:700,color:ROLE_COLORS[role]||"#6b7280",background:(ROLE_COLORS[role]||"#6b7280")+"15",padding:"3px 9px",borderRadius:99 }}>{role}</span></td>
-                      <td style={{ padding:"11px 16px",fontSize:14,fontWeight:700,color:"#0f1f3d" }}>{members.length}</td>
-                      <td style={{ padding:"11px 16px",fontSize:13,color:"#6b7280" }}>{fte.toFixed(1)}</td>
-                      <td style={{ padding:"11px 16px",fontSize:13,color:"#6b7280" }}>{led}</td>
-                      <td style={{ padding:"11px 16px",fontSize:13,color:"#6b7280" }}>{active}</td>
-                      <td style={{ padding:"11px 16px",fontSize:13,color:overdue>0?"#dc2626":"#9ca3af",fontWeight:overdue>0?700:400 }}>{overdue}</td>
+                    <tr key={role} style={{ borderBottom:"1px solid #f5f5f5" }}>
+                      <td style={{ padding:"12px 16px" }}><span style={{ fontSize:12, fontWeight:700, color:rc, background:rc+"15", padding:"3px 10px", borderRadius:99 }}>{role}</span></td>
+                      <td style={{ padding:"12px 16px", fontSize:14, fontWeight:700, color:"#0f1f3d" }}>{members.length}</td>
+                      <td style={{ padding:"12px 16px", fontSize:13, color:"#6b7280" }}>{fte.toFixed(1)}</td>
+                      <td style={{ padding:"12px 16px", fontSize:13, color: led>0?"#7c3aed":"#9ca3af", fontWeight:led>0?700:400 }}>{led||"—"}</td>
+                      <td style={{ padding:"12px 16px", fontSize:13, color: tasks>0?"#2563eb":"#9ca3af", fontWeight:tasks>0?700:400 }}>{tasks||"—"}</td>
+                      <td style={{ padding:"12px 16px", fontSize:13, color: overdue>0?"#dc2626":"#9ca3af", fontWeight:overdue>0?700:400 }}>{overdue||"—"}</td>
                     </tr>
                   );
                 })}
@@ -3788,14 +3961,14 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
             </table>
           </div>
 
-          {/* Leave summary */}
-          {people.filter(p=>p.leaveType).length > 0 && (
-            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
-              <div style={{ padding: "14px 20px", background: "#fef9c3", borderBottom: "2px solid #fde68a" }}>
-                <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 17, textTransform: "uppercase", letterSpacing: 0.8, color: "#92400e" }}>Currently on Leave</span>
+          {/* Leave table */}
+          {people.filter(lp=>lp.leaveType).length > 0 && (
+            <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden" }}>
+              <div style={{ padding:"16px 20px", background:"#fef9c3", borderBottom:"2px solid #fde68a" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:18, textTransform:"uppercase", letterSpacing:0.8, color:"#92400e" }}>Leave & Absence</div>
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr style={{ background: "#fafbfc" }}>{["Name","Role","Leave Type","From","Returning","Note"].map(h=><th key={h} style={{ padding:"9px 16px",textAlign:"left",fontSize:10,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1 }}>{h}</th>)}</tr></thead>
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead><tr style={{ background:"#fefce8" }}>{["Name","Role","Type","From","To","Notes"].map(h=><th key={h} style={{ padding:"11px 16px", textAlign:"left", fontSize:10, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1 }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {people.filter(lp=>lp.leaveType).map((lp,i)=>{
                     const role = Array.isArray(lp.roles)?lp.roles[0]:(lp.role||"");
@@ -3817,7 +3990,6 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
         </div>
       )}
 
-      {/* ── Project Report ── */}
       {mgmtTab === "projectreport" && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
