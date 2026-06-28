@@ -2065,6 +2065,32 @@ function PersonProfilePage({ person: p, people, projects, deliverables, onBack, 
               </div>
             )}
 
+            {/* Supervision */}
+            {(p.hrSupervisor || (p.projectSupervisors||[]).length > 0) && (
+              <div style={{ padding: "14px 20px", borderTop: "1px solid #f0f2f5" }}>
+                {p.hrSupervisor && (
+                  <div style={{ marginBottom: (p.projectSupervisors||[]).length > 0 ? 10 : 0 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>HR Supervisor</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#0f1f3d", display: "flex", alignItems: "center", gap: 6 }}>
+                      <Icon name="people" size={13} color="#9ca3af" />{p.hrSupervisor}
+                    </div>
+                  </div>
+                )}
+                {(p.projectSupervisors||[]).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Project / PhD Supervisor{p.projectSupervisors.length > 1 ? "s" : ""}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {p.projectSupervisors.map(name => (
+                        <div key={name} style={{ fontSize: 13, fontWeight: 600, color: "#0f1f3d", display: "flex", alignItems: "center", gap: 6 }}>
+                          <Icon name="star" size={11} color="#7c3aed" />{name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Leave */}
             {p.leaveType && (
               <div style={{ padding: "16px 20px", background: isAway ? "#fef9c3" : "#f9fafb" }}>
@@ -2144,9 +2170,30 @@ function PersonProfilePage({ person: p, people, projects, deliverables, onBack, 
                 </span>
               </div>
               <div style={{ padding: "14px 18px" }}>
+                {hrReports.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#374151", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>HR / Line Reports ({hrReports.length})</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {hrReports.map(m => {
+                        const rc = ROLE_COLORS[Array.isArray(m.roles)?m.roles[0]:(m.role||"")] || "#6b7280";
+                        return (
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "#f3f4f6", borderRadius: 3, border: "1px solid #e5e7eb" }}>
+                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: rc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: rc, overflow: "hidden", flexShrink: 0 }}>
+                              {m.photoUrl ? <img src={m.photoUrl} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : m.name.charAt(0)}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#0f1f3d" }}>{m.name}</div>
+                              <div style={{ fontSize: 10, color: "#9ca3af" }}>{Array.isArray(m.roles)?m.roles[0]:(m.role||"")}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {supervisedStudents.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Students ({supervisedStudents.length})</div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Project / PhD Students ({supervisedStudents.length})</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {supervisedStudents.map(m => {
                         const rc = ROLE_COLORS[Array.isArray(m.roles)?m.roles[0]:(m.role||"")] || "#6b7280";
@@ -3655,7 +3702,7 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
 
       {/* ── Salary Allocations ── */}
       {mgmtTab === "salary" && (() => {
-        const totalLabFTE = people.reduce((s, p) => s + (parseFloat(p.availability)||0), 0);
+        const totalLabFTE = people.filter(p => !p.memberStatus || p.memberStatus === 'active').reduce((s, p) => s + (parseFloat(p.availability)||0), 0);
 
         return (
           <div>
@@ -3693,7 +3740,8 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
                 const role = Array.isArray(person.roles) ? person.roles[0] : (person.role||"");
                 const matchSearch = !salarySearch || person.name.toLowerCase().includes(salarySearch.toLowerCase());
                 const matchRole = salaryRoleFilter === "All" || role === salaryRoleFilter;
-                return matchSearch && matchRole;
+                const isActive = !person.memberStatus || person.memberStatus === "active";
+                return matchSearch && matchRole && isActive;
               }).sort((a, b) => {
                 const LEADERSHIP_ORDER_SAL = ["Team Leader","Professor","Associate Professor","Senior Research Fellow","Research Fellow","Senior Honorary Fellow","Environmental Risk Analyst","Research Officer","Senior Scientific Software Dev","Scientific Software Developer","Administrative Assistant","Research Assistant","PhD Candidate","Masters Student"];
                 const ra = Array.isArray(a.roles) ? a.roles[0] : (a.role||"");
@@ -3880,33 +3928,23 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
                   .filter(p => !STUDENT_ROLES.some(r => (Array.isArray(p.roles)?p.roles:[p.role||""]).includes(r)))
                   .filter(p => !p.memberStatus || p.memberStatus === "active")
                   .map(person => {
-                    // Projects where this person is lead or co-lead
-                    const ledProjects = projects.filter(pr => getLeads(pr).includes(person.name) || (pr.teamMembers||[]).includes(person.name));
-                    
-                    // Find students and RAs on those projects
-                    const supervised = new Set();
-                    ledProjects.forEach(pr => {
-                      const teamNames = [...getLeads(pr), ...(pr.teamMembers||[])].filter(n => n !== person.name);
-                      teamNames.forEach(name => {
-                        const member = people.find(p => p.name === name);
-                        if (member) supervised.add(member);
-                      });
-                      // Also check deliverable assignees
-                      deliverables.filter(d => d.project === pr.id).forEach(d => {
-                        if (d.assignedTeam && d.assignedTeam !== person.name) {
-                          const m = people.find(p => p.name === d.assignedTeam);
-                          if (m) supervised.add(m);
-                        }
-                      });
-                    });
+                    const ledProjects = projects.filter(pr => getLeads(pr).includes(person.name));
 
-                    const supervisedArr = [...supervised];
+                    // Use EXPLICIT supervisor fields — who lists this person as their supervisor
+                    const hrSupervised = people.filter(m => m.hrSupervisor === person.name);
+                    const projectSupervised = people.filter(m => (m.projectSupervisors||[]).includes(person.name));
+
+                    // Merge both lists (deduplicated)
+                    const supervisedSet = new Map();
+                    [...hrSupervised, ...projectSupervised].forEach(m => supervisedSet.set(m.id, m));
+                    const supervisedArr = [...supervisedSet.values()];
+
                     const students = supervisedArr.filter(m => STUDENT_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
                     const ras = supervisedArr.filter(m => RA_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
                     const staff = supervisedArr.filter(m => !STUDENT_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)) && !RA_ROLES.some(r => (Array.isArray(m.roles)?m.roles:[m.role||""]).includes(r)));
-                    const totalLoad = students.length * 1 + ras.length * 0.5;
+                    const totalLoad = students.length * 1 + ras.length * 0.5 + hrSupervised.length * 0.3;
 
-                    return { person, students, ras, staff, supervisedArr, ledProjects, totalLoad };
+                    return { person, students, ras, staff, supervisedArr, hrSupervised, projectSupervised, ledProjects, totalLoad };
                   })
                   .filter(s => s.supervisedArr.length > 0 || s.ledProjects.length > 0)
                   .sort((a,b) => b.totalLoad - a.totalLoad || b.supervisedArr.length - a.supervisedArr.length);
@@ -3945,9 +3983,19 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
 
                       {/* Supervised people */}
                       <div style={{ flex:1, display:"flex", gap:12, flexWrap:"wrap", alignItems:"flex-start" }}>
+                        {s.hrSupervised?.length > 0 && (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:"#0f1f3d", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>HR / Line Reports ({s.hrSupervised.length})</div>
+                            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                              {s.hrSupervised.map(m => (
+                                <span key={m.id} style={{ fontSize:11, color:"#374151", background:"#f3f4f6", padding:"2px 8px", borderRadius:99, fontWeight:600, border:"1px solid #e5e7eb" }}>{m.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {s.students.length > 0 && (
                           <div>
-                            <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>Students ({s.students.length})</div>
+                            <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", textTransform:"uppercase", letterSpacing:0.5, marginBottom:5 }}>Students — Project/PhD ({s.students.length})</div>
                             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
                               {s.students.map(m => (
                                 <span key={m.id} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", padding:"2px 8px", borderRadius:99, fontWeight:600, border:"1px solid #e9d5ff" }}>{m.name}</span>
@@ -5262,8 +5310,16 @@ function PersonModal({ data, onSave, onClose }) {
     leaveEnd: data?.leaveEnd || "",
     leaveNote: data?.leaveNote || "",
     memberStatus: data?.memberStatus || "active",
+    hrSupervisor: data?.hrSupervisor || "",
+    projectSupervisors: data?.projectSupervisors || [],
   });
   const set = k => v => setForm(f => ({ ...f, [k]: v }));
+  const toggleProjectSup = (name) => setForm(f => ({
+    ...f,
+    projectSupervisors: f.projectSupervisors.includes(name)
+      ? f.projectSupervisors.filter(n => n !== name)
+      : [...f.projectSupervisors, name]
+  }));
 
   const toggleRole = (r) => {
     setForm(f => ({
@@ -5418,6 +5474,37 @@ function PersonModal({ data, onSave, onClose }) {
         )}
       </div>
 
+      {/* Supervision */}
+      <div style={{ borderTop: "2px solid #f0f2f5", paddingTop: 14, marginTop: 4 }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 12 }}>Supervision & Reporting</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <Field label="HR Supervisor (approves leave, line manager)">
+            <select value={form.hrSupervisor} onChange={e => setForm(f => ({ ...f, hrSupervisor: e.target.value }))}
+              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: 3, fontSize: 14, outline: "none", fontFamily: "inherit", background: "#fafafa" }}>
+              <option value="">— None / Not set —</option>
+              {[...people].filter(p => p.id !== data?.id).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                <option key={p.id} value={p.name}>{p.name}</option>
+              ))}
+            </select>
+          </Field>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Project / PhD Supervisor(s)</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "8px", border: "1.5px solid #e5e7eb", borderRadius: 3, background: "#fafafa", maxHeight: 120, overflowY: "auto" }}>
+              {[...people].filter(p => p.id !== data?.id).sort((a,b) => a.name.localeCompare(b.name)).map(p => {
+                const selected = form.projectSupervisors.includes(p.name);
+                const rc = ROLE_COLORS[Array.isArray(p.roles)?p.roles[0]:(p.role||"")] || "#6b7280";
+                return (
+                  <button key={p.id} type="button" onClick={() => toggleProjectSup(p.name)}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 99, border: `1.5px solid ${selected ? rc : "#e5e7eb"}`, background: selected ? rc+"15" : "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600, color: selected ? rc : "#6b7280" }}>
+                    {selected && <Icon name="check" size={10} color={rc} />}{p.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Member Status */}
       <div style={{ borderTop: "2px solid #f0f2f5", paddingTop: 14, marginTop: 4 }}>
         <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 10 }}>Member Status</div>
@@ -5427,7 +5514,12 @@ function PersonModal({ data, onSave, onClose }) {
             { value: "available", label: "Available — Contract Ended", color: "#2563eb", desc: "Past member, may return" },
             { value: "inactive", label: "Inactive", color: "#9ca3af", desc: "No longer available" },
           ].map(s => (
-            <button key={s.value} type="button" onClick={() => setForm(f => ({ ...f, memberStatus: s.value }))}
+            <button key={s.value} type="button" onClick={() => setForm(f => ({
+              ...f,
+              memberStatus: s.value,
+              // Auto-zero FTE when marking as former member
+              availability: s.value !== "active" ? 0 : (f.availability || 1),
+            }))}
               style={{ flex: 1, padding: "10px 8px", borderRadius: 3, border: `2px solid ${form.memberStatus === s.value ? s.color : "#e5e7eb"}`, background: form.memberStatus === s.value ? s.color + "12" : "#fff", cursor: "pointer", textAlign: "center", transition: "all 0.15s" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: form.memberStatus === s.value ? s.color : "#6b7280" }}>{s.label}</div>
               <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{s.desc}</div>
