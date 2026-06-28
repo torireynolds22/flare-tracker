@@ -2191,140 +2191,85 @@ function PersonProfilePage({ person: p, people, projects, deliverables, onBack, 
   );
 }
 
-function SectionHeading({ label, count, color }) => (
+function SectionHeading({ label, count, color }) {
+  return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, marginTop: 4 }}>
       <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 20, textTransform: "uppercase", letterSpacing: 1, color: "#0f1f3d" }}>{label}</div>
       <div style={{ background: color + "18", color, borderRadius: 99, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>{count}</div>
       <div style={{ flex: 1, height: 1, background: "#e8eaed" }} />
     </div>
-  )}
+  );
+}
 
-function PersonCard({ p, projects, deliverables, onSelect }) {
-    const primaryRole = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
-    const allRoles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
-    const roleColor = ROLE_COLORS[primaryRole] || "#6b7280";
-    const projCount = projects.filter(pr => getLeads(pr).includes(p.name)).length;
-    const assignedDels = deliverables.filter(d => (d.assignedTeam === p.name || d.teamLead === p.name) && d.status !== "Completed");
-    const overdueDels = assignedDels.filter(d => d.deadline && new Date(d.deadline) < new Date());
-    const themes = (p.themes || []).map(tid => RESEARCH_THEMES.find(t => t.id === tid)).filter(Boolean);
-    const primaryRole = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
-    const allRoles = Array.isArray(p.roles) ? p.roles : [p.role || ""];
-    const roleColor = ROLE_COLORS[primaryRole] || "#6b7280";
-    const projCount = projects.filter(pr => getLeads(pr).includes(p.name)).length;
-    const assignedDels = deliverables.filter(d => (d.assignedTeam === p.name || d.teamLead === p.name) && d.status !== "Completed");
-    const overdueDels = assignedDels.filter(d => d.deadline && new Date(d.deadline) < new Date());
-    const themes = (p.themes || []).map(tid => RESEARCH_THEMES.find(t => t.id === tid)).filter(Boolean);
+function PersonCard({ p, projects, deliverables, onSelect, onEdit, onDelete }) {
+  const primaryRole = Array.isArray(p.roles) ? p.roles[0] : (p.role || "");
+  const allRoles = Array.isArray(p.roles) ? p.roles : (p.role ? [p.role] : []);
+  const roleColor = ROLE_COLORS[primaryRole] || "#6b7280";
+  const projCount = projects.filter(pr => getLeads(pr).includes(p.name)).length;
+  const assignedDels = deliverables.filter(d => (d.assignedTeam === p.name || d.teamLead === p.name) && d.status !== "Completed");
+  const overdueDels = assignedDels.filter(d => d.deadline && new Date(d.deadline) < new Date());
+  const themes = (p.themes || []).map(tid => RESEARCH_THEMES.find(t => t.id === tid)).filter(Boolean);
 
-    return (
-      <div onClick={() => onSelect(p)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden", transition: "box-shadow 0.15s", cursor: "pointer" }}
-        onMouseEnter={e => e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.1)"}
-        onMouseLeave={e => e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)"}>
-        <div style={{ height: 5, background: roleColor }} />
-        <div style={{ padding: "18px" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
-            <div style={{ width: 68, height: 68, borderRadius: "50%", background: roleColor + "20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 24, color: roleColor, flexShrink: 0, overflow: "hidden", border: `3px solid ${roleColor}33`, boxShadow: "0 2px 8px rgba(0,0,0,0.08)" }}>
-              {p.photoUrl ? <img src={p.photoUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : p.name.charAt(0)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#0f1f3d", marginBottom: 2, lineHeight: 1.2 }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>{p.email}</div>
-              <span style={{ fontSize: 11, fontWeight: 700,
-                color: (p.availability||0) >= 1 ? "#059669" : (p.availability||0) >= 0.6 ? "#2563eb" : "#d97706",
-                background: (p.availability||0) >= 1 ? "#dcfce7" : (p.availability||0) >= 0.6 ? "#dbeafe" : "#fef3c7",
-                padding: "3px 10px", borderRadius: 99 }}>
-                {p.availability || 0} FTE
-              </span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, alignItems: "flex-end" }}>
-              {overdueDels.length > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#fef2f2", borderRadius: 99, padding: "3px 8px" }}>
-                  <Icon name="alert" size={11} color="#dc2626" />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626" }}>{overdueDels.length}</span>
-                </div>
-              )}
-              {p.leaveType && (
-                <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#fef9c3", borderRadius: 99, padding: "3px 8px" }}>
-                  <Icon name="clock" size={11} color="#92400e" />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "#92400e" }}>Away</span>
-                </div>
-              )}
-            </div>
+  return (
+    <div onClick={() => onSelect(p)} style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden", transition: "box-shadow 0.15s", cursor: "pointer" }}
+      onMouseEnter={e => e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.1)"}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)"}>
+      <div style={{ height: 5, background: roleColor }} />
+      <div style={{ padding: "18px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
+          <div style={{ width: 68, height: 68, borderRadius: "50%", background: roleColor + "20", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 24, color: roleColor, flexShrink: 0, overflow: "hidden", border: `3px solid ${roleColor}33`, boxShadow: "0 2px 8px rgba(0,0,0,0.08)" }}>
+            {p.photoUrl ? <img src={p.photoUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : p.name.charAt(0)}
           </div>
-
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: themes.length > 0 ? 8 : 12 }}>
-            {allRoles.map(r => (
-              <span key={r} style={{ fontSize: 11, fontWeight: 700, color: ROLE_COLORS[r] || "#6b7280", background: (ROLE_COLORS[r] || "#6b7280") + "15", padding: "3px 9px", borderRadius: 99, border: `1px solid ${(ROLE_COLORS[r] || "#6b7280")}30` }}>{r}</span>
-            ))}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0f1f3d", marginBottom: 2 }}>{p.name}</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>{p.email}</div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: (p.availability||0) >= 1 ? "#059669" : "#2563eb", background: (p.availability||0) >= 1 ? "#dcfce7" : "#dbeafe", padding: "3px 10px", borderRadius: 99 }}>
+              {p.availability || 0} FTE
+            </span>
           </div>
-
-          {themes.length > 0 && (
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
-              {themes.map(t => (
-                <span key={t.id} style={{ fontSize: 10, fontWeight: 700, color: t.color, background: t.color + "12", padding: "2px 8px", borderRadius: 99, border: `1px solid ${t.color}25` }}>{t.label}</span>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8, paddingTop: 10, borderTop: "1px solid #f0f2f5", marginBottom: 12 }}>
-            {[
-              { label: "Projects Led", val: projCount, color: "#7c3aed" },
-              { label: "Active Tasks", val: assignedDels.length, color: "#2563eb" },
-              { label: "Overdue", val: overdueDels.length, color: overdueDels.length > 0 ? "#dc2626" : "#9ca3af" },
-            ].map(s => (
-              <div key={s.label} style={{ flex: 1, textAlign: "center", padding: "8px 4px", background: "#f8f9fb", borderRadius: 3 }}>
-                <div style={{ fontSize: 18, fontWeight: 900, color: s.color, fontFamily: "'Barlow Condensed', sans-serif", lineHeight: 1 }}>{s.val}</div>
-                <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 2 }}>{s.label}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, alignItems: "flex-end" }}>
+            {overdueDels.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#fef2f2", borderRadius: 99, padding: "3px 8px" }}>
+                <Icon name="alert" size={11} color="#dc2626" />
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626" }}>{overdueDels.length}</span>
               </div>
-            ))}
-          </div>
-
-          {p.leaveType && (() => {
-            const now = new Date();
-            const start = p.leaveStart ? new Date(p.leaveStart) : null;
-            const end = p.leaveEnd ? new Date(p.leaveEnd) : null;
-            const isAway = !(start && now < start) && !(end && now > end);
-            const col = isAway ? "#92400e" : "#374151";
-            const bg = isAway ? "#fef9c3" : "#f3f4f6";
-            return (
-              <div style={{ marginBottom: 10, padding: "9px 12px", borderRadius: 3, background: bg, border: `1px solid ${isAway ? "#fde68a" : "#e5e7eb"}`, display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <Icon name="clock" size={13} color={col} style={{ marginTop: 1, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: col }}>{p.leaveType}{isAway ? " — Currently Away" : " — Upcoming"}</div>
-                  {(p.leaveStart || p.leaveEnd) && (
-                    <div style={{ fontSize: 11, color: col, opacity: 0.8, marginTop: 1 }}>
-                      {p.leaveStart && new Date(p.leaveStart).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-                      {p.leaveStart && p.leaveEnd && " → "}
-                      {p.leaveEnd && new Date(p.leaveEnd).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
-                    </div>
-                  )}
-                  {p.leaveNote && <div style={{ fontSize: 11, color: col, opacity: 0.7, marginTop: 1, fontStyle: "italic" }}>{p.leaveNote}</div>}
-                </div>
-              </div>
-            );
-          })()}
-
-          {(p.phone || p.notes) && (
-            <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
-              {p.phone && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}><Icon name="info" size={12} color="#9ca3af" />{p.phone}</div>}
-              {p.notes && <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", lineHeight: 1.4 }}>{p.notes?.slice(0, 80)}{p.notes?.length > 80 ? "…" : ""}</div>}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
-            <button onClick={() => onSelect(p)} style={{ flex: 1, padding: "8px", border: "1.5px solid #e85d27", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "#e85d27", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-              <Icon name="people" size={13} color="#e85d27" /> View Profile
-            </button>
-            <button onClick={() => onEdit(p)} style={{ padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
-              <Icon name="edit" size={14} color="#6b7280" />
-            </button>
-            <button onClick={() => { if (confirm("Remove " + p.name + "?")) onDelete(p.id); }} style={{ padding: "8px 12px", border: "1.5px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
-              <Icon name="trash" size={14} color="#dc2626" />
-            </button>
+            )}
           </div>
         </div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+          {allRoles.map(r => (
+            <span key={r} style={{ fontSize: 11, fontWeight: 700, color: ROLE_COLORS[r] || "#6b7280", background: (ROLE_COLORS[r] || "#6b7280") + "15", padding: "3px 9px", borderRadius: 99, border: `1px solid ${(ROLE_COLORS[r] || "#6b7280")}30` }}>{r}</span>
+          ))}
+        </div>
+        {themes.length > 0 && (
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+            {themes.map(t => <span key={t.id} style={{ fontSize: 10, fontWeight: 700, color: t.color, background: t.color + "12", padding: "2px 8px", borderRadius: 99 }}>{t.label}</span>)}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, paddingTop: 10, borderTop: "1px solid #f0f2f5", marginBottom: 12 }}>
+          {[{ label: "Projects Led", val: projCount, color: "#7c3aed" }, { label: "Active Tasks", val: assignedDels.length, color: "#2563eb" }, { label: "Overdue", val: overdueDels.length, color: overdueDels.length > 0 ? "#dc2626" : "#9ca3af" }].map(s => (
+            <div key={s.label} style={{ flex: 1, textAlign: "center", padding: "8px 4px", background: "#f8f9fb", borderRadius: 3 }}>
+              <div style={{ fontSize: 18, fontWeight: 900, color: s.color, fontFamily: "'Barlow Condensed', sans-serif", lineHeight: 1 }}>{s.val}</div>
+              <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
+          <button onClick={() => onSelect(p)} style={{ flex: 1, padding: "8px", border: "1.5px solid #e85d27", borderRadius: 2, background: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#e85d27", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            <Icon name="people" size={13} color="#e85d27" /> View Profile
+          </button>
+          <button onClick={() => onEdit(p)} style={{ padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
+            <Icon name="edit" size={14} color="#6b7280" />
+          </button>
+          <button onClick={() => { if(confirm("Remove " + p.name + "?")) onDelete(p.id); }} style={{ padding: "8px 12px", border: "1.5px solid #fecaca", borderRadius: 2, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
+            <Icon name="trash" size={14} color="#dc2626" />
+          </button>
+        </div>
       </div>
-    );
+    </div>
+  );
 }
+
 
 function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, onEdit, onDelete }) {
   const [roleFilter, setRoleFilter] = useState("All");
@@ -2461,7 +2406,7 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
         <div style={{ marginBottom: 32 }}>
           <SectionHeading label="Staff" count={staff.length} color="#0f1f3d" />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
-            {staff.map(p => <PersonCard key={p.id} p={p} />)}
+            {staff.map(p => <PersonCard key={p.id} p={p} projects={projects} deliverables={deliverables} onSelect={setProfilePerson} onEdit={onEdit} onDelete={onDelete} />)}
           </div>
         </div>
       )}
@@ -2471,7 +2416,7 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
         <div>
           <SectionHeading label="Students" count={students.length} color="#7c3aed" />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
-            {students.map(p => <PersonCard key={p.id} p={p} />)}
+            {students.map(p => <PersonCard key={p.id} p={p} projects={projects} deliverables={deliverables} onSelect={setProfilePerson} onEdit={onEdit} onDelete={onDelete} />)}
           </div>
         </div>
       )}
