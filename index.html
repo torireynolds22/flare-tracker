@@ -2952,10 +2952,17 @@ function SourceRow({ src, i, isContract, onUpdate, onRemove, today, projects }) 
             style={{ flex: 2, minWidth: 160, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit", background: "#fff" }}>
             <option value="">— Select project or source —</option>
             {(projects||[]).map(p => <option key={p.id} value={p.id}>{p.name?.slice(0,50)}</option>)}
-            <option value="__university">University base salary</option>
-            <option value="__scholarship">Scholarship</option>
-            <option value="__fellowship">Fellowship</option>
-            <option value="__other">Other</option>
+            <optgroup label="School / University">
+              <option value="__school_permanent">School-funded — Permanent Position</option>
+              <option value="__university">University base salary</option>
+              <option value="__fellowship">Fellowship / ECR</option>
+            </optgroup>
+            <optgroup label="Students">
+              <option value="__scholarship_rtp">Scholarship — RTP</option>
+              <option value="__scholarship_mq">Scholarship — MQ</option>
+              <option value="__scholarship_other">Scholarship — Other</option>
+            </optgroup>
+            <option value="__other">Other (see notes)</option>
           </select>
           <input value={src.source} onChange={e => update("source", e.target.value)} placeholder="Label / contract ref"
             style={{ flex: 1.5, minWidth: 120, padding: "7px 10px", border: "1.5px solid #dde1e9", borderRadius: 3, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
