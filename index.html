@@ -854,7 +854,7 @@ function App() {
       )}
       <div style={{ padding: "28px 32px", maxWidth: 1500, margin: "0 auto" }}>
         {tab === "dashboard" && <Dashboard projects={projects} people={people} deliverables={deliverables} setTab={setTab} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
-        {tab === "mytasks" && <MyTasksView projects={projects} people={people} deliverables={deliverables} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
+        {tab === "mytasks" && <MyTasksView projects={projects} people={people} deliverables={deliverables} outputs={outputs} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
         {tab === "projects" && <ProjectsView projects={projects} people={people} deliverables={deliverables} outputs={outputs} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "project", data: null })} onEdit={p => setModal({ type: "project", data: p })} onDelete={deleteProject} onUpdateProject={upsertProject} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} onAddOutput={o => setModal({ type: "output", data: o })} onEditOutput={o => setModal({ type: "output", data: o })} />}
         {tab === "people" && <PeopleView people={people} projects={projects} deliverables={deliverables} search={search} setSearch={setSearch} onAdd={() => setModal({ type: "person", data: null })} onEdit={p => setModal({ type: "person", data: p })} onDelete={deletePerson} />}
         {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} onUpdateDeliverable={upsertDeliverable} />}
@@ -2417,7 +2417,8 @@ function PeopleView({ people, projects, deliverables, search, setSearch, onAdd, 
     const matchRole = roleFilter === "All" || roles.includes(roleFilter);
     const matchTheme = themeFilter === "All" || (p.themes || []).includes(themeFilter);
     const matchLeave = leaveFilter === "All" || (leaveFilter === "On Leave" ? !!p.leaveType : !p.leaveType);
-    return matchSearch && matchRole && matchTheme && matchLeave;
+    const isActive = !p.memberStatus || p.memberStatus === "active";
+    return matchSearch && matchRole && matchTheme && matchLeave && isActive;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -2855,189 +2856,327 @@ function TaskSection({ title, items, accent, emptyMsg, selectedPerson, projects,
 }
 
 // ── My Tasks View ─────────────────────────────────────────────────────────────
-function MyTasksView({ projects, people, deliverables, onEditDeliverable, onUpdateDeliverable }) {
-  const [selectedPerson, setSelectedPerson] = useState("");
-  const [filterStatus, setFilterStatus] = useState("Active");
-
+function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverable, onUpdateDeliverable, onEditProject }) {
+  const [selectedPerson, setSelectedPerson] = useState(() => {
+    try { return localStorage.getItem("flare_my_person") || ""; } catch { return ""; }
+  });
+  const [editingCell, setEditingCell] = useState(null);
   const today = new Date();
+
+  const setPerson = (name) => {
+    setSelectedPerson(name);
+    try { localStorage.setItem("flare_my_person", name); } catch {}
+  };
+
   const person = people.find(p => p.name === selectedPerson);
+  const role = person ? (Array.isArray(person.roles) ? person.roles[0] : (person.role || "")) : "";
+  const rc = ROLE_COLORS[role] || "#6b7280";
 
-  const myDeliverables = selectedPerson
-    ? deliverables.filter(d => d.assignedTeam === selectedPerson || d.teamLead === selectedPerson)
-    : [];
-
-  const myProjects = selectedPerson
-    ? projects.filter(p => getLeads(p).includes(selectedPerson))
-    : [];
-
-  const filtered = myDeliverables.filter(d => {
-    if (filterStatus === "Active") return d.status !== "Completed";
-    if (filterStatus === "Completed") return d.status === "Completed";
-    return true;
+  // My data
+  const myProjects = projects.filter(p =>
+    getLeads(p).includes(selectedPerson) ||
+    (p.teamMembers||[]).includes(selectedPerson)
+  );
+  const myDels = deliverables.filter(d =>
+    d.assignedTeam === selectedPerson || d.teamLead === selectedPerson
+  );
+  const myOutputs = (outputs||[]).filter(o =>
+    (o.authors||"").toLowerCase().includes((selectedPerson||"").toLowerCase().split(" ")[0])
+  );
+  const overdue = myDels.filter(d => d.deadline && d.status !== "Completed" && d.status !== "Complete" && new Date(d.deadline) < today);
+  const dueThisWeek = myDels.filter(d => {
+    if (!d.deadline || d.status === "Completed" || d.status === "Complete") return false;
+    const diff = (new Date(d.deadline) - today) / 86400000;
+    return diff >= 0 && diff <= 7;
+  });
+  const active = myDels.filter(d => d.status !== "Completed" && d.status !== "Complete");
+  const completedThisMonth = myDels.filter(d => {
+    if (d.status !== "Completed" && d.status !== "Complete") return false;
+    if (!d.deadline) return false;
+    const dd = new Date(d.deadline);
+    return dd.getMonth() === today.getMonth() && dd.getFullYear() === today.getFullYear();
   });
 
-  const overdue = filtered.filter(d => d.deadline && d.status !== "Completed" && new Date(d.deadline) < today);
-  const upcoming = filtered.filter(d => {
-    if (!d.deadline || d.status === "Completed") return false;
-    const diff = (new Date(d.deadline) - today) / (1000 * 60 * 60 * 24);
-    return diff >= 0 && diff <= 30;
-  });
-  const later = filtered.filter(d => {
-    if (!d.deadline || d.status === "Completed") return false;
-    const diff = (new Date(d.deadline) - today) / (1000 * 60 * 60 * 24);
-    return diff > 30;
-  });
-  const noDue = filtered.filter(d => !d.deadline && d.status !== "Completed");
-  const completedList = myDeliverables.filter(d => d.status === "Completed");
+  // Supervised people
+  const hrReports = people.filter(m => m.hrSupervisor === selectedPerson);
+  const projectSupervised = people.filter(m => (m.projectSupervisors||[]).includes(selectedPerson));
 
-  const primaryRole = Array.isArray(person?.roles) ? person.roles[0] : (person?.role || "");
-  const roleColor = person ? (ROLE_COLORS[primaryRole] || "#6b7280") : "#6b7280";
+  // Quick save
+  const saveField = async (d, field, value) => {
+    if (onUpdateDeliverable) await onUpdateDeliverable({ ...d, [field]: value });
+    setEditingCell(null);
+  };
 
-  const sectionProps = { selectedPerson, projects, today, onEditDeliverable, onUpdateDeliverable };
+  const STATUSES = ["Not Started","In Progress","Completed","On Hold","Blocked"];
+  const STATUS_COLORS_MY = {
+    "Not Started": { bg:"#f3f4f6", text:"#6b7280" },
+    "In Progress":  { bg:"#fef9c3", text:"#854d0e" },
+    "Completed":    { bg:"#dcfce7", text:"#166534" },
+    "Complete":     { bg:"#dcfce7", text:"#166534" },
+    "Blocked":      { bg:"#fee2e2", text:"#991b1b" },
+    "On Hold":      { bg:"#f3f4f6", text:"#4b5563" },
+  };
 
+  const getQuarter = (dateStr) => {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    const m = d.getMonth();
+    const y = d.getFullYear();
+    if (m >= 6 && m <= 8)  return `Q1 ${y}/${String(y+1).slice(2)}`;
+    if (m >= 9 && m <= 11) return `Q2 ${y}/${String(y+1).slice(2)}`;
+    if (m >= 0 && m <= 2)  return `Q3 ${y-1}/${String(y).slice(2)}`;
+    return `Q4 ${y-1}/${String(y).slice(2)}`;
+  };
+
+  // ── No person selected ────────────────────────────────────────────────────
+  if (!selectedPerson || !person) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400, textAlign: "center" }}>
+        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#f0f2f6", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+          <Icon name="people" size={32} color="#9ca3af" />
+        </div>
+        <h2 style={{ margin: "0 0 8px", fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, textTransform: "uppercase", color: "#0f1f3d" }}>Who are you?</h2>
+        <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 15 }}>Select your name to see your personal workspace. We'll remember you next time.</p>
+        <select value={selectedPerson} onChange={e => setPerson(e.target.value)}
+          style={{ padding: "12px 20px", border: "2px solid #0f1f3d", borderRadius: 3, fontSize: 16, outline: "none", fontFamily: "inherit", fontWeight: 600, minWidth: 280, cursor: "pointer", background: "#fff" }}>
+          <option value="">Select your name…</option>
+          {[...people].filter(p => !p.memberStatus || p.memberStatus === "active").sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+            <option key={p.id} value={p.name}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  // ── Personal workspace ────────────────────────────────────────────────────
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900, fontFamily: "'Barlow Condensed', sans-serif", textTransform: "uppercase", letterSpacing: 1 }}>My Tasks</h1>
-        <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14, fontWeight: 500 }}>Select a team member to view their workload</p>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "20px 24px", background: "#0f1f3d", borderRadius: 3, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+        <div style={{ width: 56, height: 56, borderRadius: "50%", background: rc+"30", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, color: rc, flexShrink: 0, overflow: "hidden", border: `3px solid ${rc}` }}>
+          {person.photoUrl ? <img src={person.photoUrl} alt={person.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : person.name.charAt(0)}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>
+            {new Date().toLocaleDateString("en-AU", { weekday:"long", day:"numeric", month:"long" })}
+          </div>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: 0.5 }}>
+            Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"}, {person.name.split(" ")[0]}
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{role} · {person.availability||0} FTE</div>
+        </div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          {[
+            { label: "Projects", value: myProjects.length, color: "#7c3aed" },
+            { label: "Active Tasks", value: active.length, color: "#2563eb" },
+            { label: "Overdue", value: overdue.length, color: overdue.length > 0 ? "#ef4444" : "#22c55e" },
+            { label: "Due This Week", value: dueThisWeek.length, color: dueThisWeek.length > 0 ? "#f59e0b" : "#22c55e" },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: "center", minWidth: 60 }}>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => setPerson("")} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 2, padding: "6px 12px", color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          Switch
+        </button>
       </div>
 
-      <div style={{ background: "#fff", borderRadius: 2, padding: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", marginBottom: 24 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 }}>Team Member</label>
-            <select value={selectedPerson} onChange={e => setSelectedPerson(e.target.value)}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 2, fontSize: 14, outline: "none", background: "#fafafa", cursor: "pointer", fontFamily: "inherit" }}>
-              <option value="">— Select a person —</option>
-              {[...people].sort((a, b) => a.name.localeCompare(b.name)).map(p => (
-                <option key={p.id} value={p.name}>{p.name} · {p.role}</option>
-              ))}
-            </select>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+        {/* My Projects */}
+        <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
+          <div style={{ padding: "14px 18px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>My Projects ({myProjects.length})</span>
           </div>
           <div>
-            <label style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 }}>Show</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              {["Active", "Completed", "All"].map(s => (
-                <button key={s} onClick={() => setFilterStatus(s)} style={{
-                  padding: "9px 16px", borderRadius: 3, border: "1.5px solid", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                  borderColor: filterStatus === s ? "#2563eb" : "#e5e7eb",
-                  background: filterStatus === s ? "#2563eb" : "#fff",
-                  color: filterStatus === s ? "#fff" : "#374151",
-                }}>{s}</button>
-              ))}
-            </div>
+            {myProjects.length === 0 && <div style={{ padding: "20px", fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No projects assigned</div>}
+            {myProjects.map(p => {
+              const { rag } = scoreProject(p, deliverables);
+              const isLead = getLeads(p).includes(selectedPerson);
+              const projDels = deliverables.filter(d => d.project === p.id);
+              const projOverdue = projDels.filter(d => d.deadline && d.status !== "Completed" && new Date(d.deadline) < today).length;
+              return (
+                <div key={p.id} style={{ padding: "12px 18px", borderBottom: "1px solid #f5f5f5", display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: RAG_COLORS[rag], flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
+                      {isLead && <span style={{ fontSize: 9, fontWeight: 800, color: "#e85d27", background: "#fff7f5", padding: "1px 6px", borderRadius: 99, border: "1px solid #fed7aa" }}>LEAD</span>}
+                      {projOverdue > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626" }}>{projOverdue} overdue</span>}
+                      <span style={{ fontSize: 10, color: "#9ca3af" }}>{p.status}</span>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 20, fontWeight: 900, color: p.progress > 0 ? "#e85d27" : "#d1d5db" }}>{p.progress||0}%</div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {person && (
-          <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ width: 52, height: 52, borderRadius: "50%", background: roleColor + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: roleColor, flexShrink: 0, overflow: "hidden" }}>
-              {person.photoUrl
-                ? <img src={person.photoUrl} alt={person.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                : person.name.charAt(0)}
+        {/* Right column — outputs + supervision */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* My Outputs */}
+          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", flex: 1 }}>
+            <div style={{ padding: "14px 18px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>
+              My Outputs ({myOutputs.length})
             </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 18, color: "#0f172a" }}>{person.name}</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                {(Array.isArray(person.roles) ? person.roles : [person.role]).map(r => (
-                  <Tag key={r} label={r} color={ROLE_COLORS[r] || "#6b7280"} />
-                ))}
-                {(person.themes || []).map(tid => {
-                  const t = RESEARCH_THEMES.find(t => t.id === tid);
-                  return t ? <Tag key={tid} label={t.label} color={t.color} /> : null;
+            {myOutputs.length === 0 && <div style={{ padding: "16px 18px", fontSize: 13, color: "#9ca3af" }}>No outputs logged yet</div>}
+            {myOutputs.slice(0,4).map(o => {
+              const done = ["Published","Live"].includes(o.status);
+              return (
+                <div key={o.id} style={{ padding: "10px 18px", borderBottom: "1px solid #f5f5f5", display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0f1f3d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</div>
+                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{o.type} · {o.status}</div>
+                  </div>
+                  {!done && <span style={{ fontSize: 12, fontWeight: 700, color: "#e85d27", flexShrink: 0 }}>{o.progress||0}%</span>}
+                  {done && <span style={{ fontSize: 12, color: "#16a34a", flexShrink: 0 }}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Supervision */}
+          {(hrReports.length > 0 || projectSupervised.length > 0) && (
+            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", background: "#f5f3ff", borderBottom: "2px solid #e9d5ff", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#7c3aed" }}>
+                I Supervise ({hrReports.length + projectSupervised.length})
+              </div>
+              <div style={{ padding: "12px 18px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {[...new Map([...hrReports,...projectSupervised].map(m=>[m.id,m])).values()].map(m => {
+                  const mrc = ROLE_COLORS[Array.isArray(m.roles)?m.roles[0]:(m.role||"")] || "#6b7280";
+                  const isHR = hrReports.find(r => r.id === m.id);
+                  const isProject = projectSupervised.find(r => r.id === m.id);
+                  return (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "#f8f9fb", borderRadius: 99, border: "1px solid #e5e7eb" }}>
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: mrc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: mrc, overflow: "hidden", flexShrink: 0 }}>
+                        {m.photoUrl ? <img src={m.photoUrl} alt={m.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : m.name.charAt(0)}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>{m.name}</span>
+                      {isHR && <span style={{ fontSize: 9, color: "#6b7280", background: "#e5e7eb", padding: "1px 5px", borderRadius: 99 }}>HR</span>}
+                      {isProject && <span style={{ fontSize: 9, color: "#7c3aed", background: "#f5f3ff", padding: "1px 5px", borderRadius: 99 }}>Project</span>}
+                    </div>
+                  );
                 })}
-                <Tag label={`${person.availability} FTE`} color={person.availability >= 1 ? "#059669" : person.availability >= 0.6 ? "#2563eb" : "#d97706"} />
               </div>
             </div>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 20, textAlign: "center", flexWrap: "wrap" }}>
-              {[
-                { label: "Total Tasks", value: myDeliverables.length, color: "#374151" },
-                { label: "Active", value: myDeliverables.filter(d => d.status !== "Completed").length, color: "#2563eb" },
-                { label: "Done", value: completedList.length, color: "#16a34a" },
-                { label: "Overdue", value: overdue.length, color: "#dc2626" },
-                { label: "Projects Led", value: myProjects.length, color: "#7c3aed" },
-              ].map(s => (
-                <div key={s.label}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 600 }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
+          )}
+        </div>
+      </div>
+
+      {/* My Deliverables — inline editable board */}
+      <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>
+            My Deliverables
+            {overdue.length > 0 && <span style={{ marginLeft: 10, fontSize: 12, color: "#dc2626", fontWeight: 700, background: "#fee2e2", padding: "2px 8px", borderRadius: 99 }}>{overdue.length} overdue</span>}
+          </div>
+          <div style={{ fontSize: 12, color: "#9ca3af" }}>Click any cell to edit</div>
+        </div>
+
+        {myDels.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No deliverables assigned to you</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f8f9fb", borderBottom: "2px solid #e8eaed" }}>
+                  {["Quarter","Project","Deliverable","Target","Status","Progress","Notes"].map(h => (
+                    <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[...myDels].sort((a,b) => {
+                  // Overdue first, then by deadline
+                  const aOver = a.deadline && new Date(a.deadline) < today && a.status !== "Completed";
+                  const bOver = b.deadline && new Date(b.deadline) < today && b.status !== "Completed";
+                  if (aOver && !bOver) return -1;
+                  if (!aOver && bOver) return 1;
+                  return (a.deadline||"9999") < (b.deadline||"9999") ? -1 : 1;
+                }).map((d, idx) => {
+                  const proj = projects.find(p => p.id === d.project);
+                  const isOverdue = d.deadline && d.status !== "Completed" && d.status !== "Complete" && new Date(d.deadline) < today;
+                  const isDone = d.status === "Completed" || d.status === "Complete";
+                  const sc = STATUS_COLORS_MY[d.status] || STATUS_COLORS_MY["Not Started"];
+
+                  return (
+                    <tr key={d.id} style={{ borderBottom: "1px solid #f0f2f5", background: isOverdue ? "#fff8f8" : isDone ? "#f9fffe" : "#fff" }}>
+                      {/* Quarter */}
+                      <td style={{ padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{getQuarter(d.deadline)}</td>
+
+                      {/* Project */}
+                      <td style={{ padding: "8px 12px", fontSize: 11, color: "#9ca3af", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={proj?.name}>{proj?.name?.slice(0,30) || "—"}</td>
+
+                      {/* Deliverable */}
+                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "name" })}>
+                        {editingCell?.delId === d.id && editingCell?.field === "name" ? (
+                          <input autoFocus defaultValue={d.name} onBlur={e => saveField(d,"name",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"name",e.target.value)}
+                            style={{ width:"100%", padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:12, outline:"none", fontFamily:"monospace", fontWeight:700 }} />
+                        ) : (
+                          <div style={{ fontSize:12, fontWeight:700, color: isDone ? "#9ca3af" : "#0f1f3d", fontFamily:"monospace", textDecoration: isDone ? "line-through" : "none", cursor:"text", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:220 }} title={d.name}>{d.name}</div>
+                        )}
+                      </td>
+
+                      {/* Target date */}
+                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "deadline" })}>
+                        {editingCell?.delId === d.id && editingCell?.field === "deadline" ? (
+                          <input autoFocus type="date" defaultValue={d.deadline||""} onBlur={e => saveField(d,"deadline",e.target.value)}
+                            style={{ padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none" }} />
+                        ) : (
+                          <div style={{ fontSize:11, fontWeight: isOverdue ? 700 : 400, color: isOverdue ? "#dc2626" : "#6b7280", cursor:"text", whiteSpace:"nowrap" }}>
+                            {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"2-digit"}) : <span style={{color:"#d1d5db"}}>—</span>}
+                            {isOverdue && " ⚠"}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td style={{ padding: "4px 12px" }}>
+                        <select value={d.status||"Not Started"} onChange={e => saveField(d,"status",e.target.value)} onClick={e => e.stopPropagation()}
+                          style={{ padding:"3px 6px", border:"none", borderRadius:2, fontSize:11, fontWeight:700, outline:"none", cursor:"pointer", fontFamily:"inherit", background:sc.bg, color:sc.text }}>
+                          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+
+                      {/* Progress */}
+                      <td style={{ padding: "4px 12px", minWidth: 130 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          <input type="range" min="0" max="100" step="5" value={d.progress||0}
+                            onChange={e => onUpdateDeliverable({ ...d, progress: Number(e.target.value) })}
+                            onMouseUp={e => saveField(d,"progress",Number(e.target.value))}
+                            onClick={e => e.stopPropagation()}
+                            style={{ flex:1, accentColor:"#e85d27", cursor:"pointer" }} />
+                          <span style={{ fontSize:11, fontWeight:700, color:"#e85d27", width:28, textAlign:"right", flexShrink:0 }}>{d.progress||0}%</span>
+                        </div>
+                      </td>
+
+                      {/* Notes */}
+                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "comments" })}>
+                        {editingCell?.delId === d.id && editingCell?.field === "comments" ? (
+                          <input autoFocus defaultValue={d.comments||""} onBlur={e => saveField(d,"comments",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"comments",e.target.value)}
+                            style={{ width:"100%", padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none", fontFamily:"inherit" }} />
+                        ) : (
+                          <div style={{ fontSize:11, color: d.comments ? "#374151" : "#d1d5db", cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:200 }} title={d.comments}>
+                            {d.comments || "Add note..."}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
-
-      {!selectedPerson && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🙋</div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>Select a team member above to see their tasks</div>
-          <div style={{ fontSize: 14, marginTop: 4 }}>Shows all deliverables they're assigned to or leading</div>
-        </div>
-      )}
-
-      {selectedPerson && myDeliverables.length === 0 && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>✨</div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>No deliverables assigned to {selectedPerson}</div>
-          <div style={{ fontSize: 14, marginTop: 4 }}>Add deliverables in the Deliverables tab and assign them to this person</div>
-        </div>
-      )}
-
-      {selectedPerson && myDeliverables.length > 0 && (
-        <div>
-          {filterStatus !== "Completed" && (
-            <>
-              <TaskSection title="Overdue" items={overdue} accent="#dc2626" {...sectionProps} />
-              <TaskSection title="Due This Week" items={upcoming.filter(d => { const diff=(new Date(d.deadline)-today)/86400000; return diff>=0&&diff<=7; })} accent="#f59e0b" {...sectionProps} />
-              <TaskSection title="Due within 30 days" items={upcoming.filter(d => { const diff=(new Date(d.deadline)-today)/86400000; return diff>7&&diff<=30; })} accent="#d97706" {...sectionProps} />
-              <TaskSection title="Upcoming" items={later} accent="#2563eb" {...sectionProps} />
-              <TaskSection title="No Deadline" items={noDue} accent="#6b7280" {...sectionProps} />
-            </>
-          )}
-          {filterStatus === "Completed" && (
-            <TaskSection title="Completed" items={completedList} accent="#16a34a" emptyMsg="No completed deliverables yet." {...sectionProps} />
-          )}
-          {filterStatus === "All" && (
-            <>
-              <TaskSection title="Overdue" items={overdue} accent="#dc2626" {...sectionProps} />
-              <TaskSection title="Due This Week" items={upcoming.filter(d => { const diff=(new Date(d.deadline)-today)/86400000; return diff>=0&&diff<=7; })} accent="#f59e0b" {...sectionProps} />
-              <TaskSection title="Due within 30 days" items={upcoming.filter(d => { const diff=(new Date(d.deadline)-today)/86400000; return diff>7&&diff<=30; })} accent="#d97706" {...sectionProps} />
-              <TaskSection title="Upcoming" items={later} accent="#2563eb" {...sectionProps} />
-              <TaskSection title="No Deadline" items={noDue} accent="#6b7280" {...sectionProps} />
-              <TaskSection title="Completed" items={completedList} accent="#16a34a" {...sectionProps} />
-            </>
-          )}
-
-          {myProjects.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, color: "#7c3aed", marginBottom: 10 }}>
-                Projects Led · {myProjects.length}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
-                {myProjects.map(p => (
-                  <div key={p.id} style={{ background: "#fff", borderRadius: 2, padding: "14px 16px", border: "1.5px solid #f0f0f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", borderLeft: "3px solid #7c3aed" }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "#0f172a", marginBottom: 4 }}>{p.name}</div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <StatusBadge status={p.status} />
-                      <span style={{ fontSize: 12, color: "#7c3aed", fontWeight: 700 }}>{p.progress || 0}%</span>
-                    </div>
-                    <div style={{ marginTop: 8 }}><ProgressBar value={p.progress || 0} color="#7c3aed" /></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-
-
     </div>
   );
 }
 
-// ── PIN Gate ──────────────────────────────────────────────────────────────────
-const MGMT_PASSWORD = "fire2024";
 
 function PinGate({ onUnlock }) {
   const [input, setInput] = useState("");
