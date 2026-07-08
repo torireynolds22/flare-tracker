@@ -854,7 +854,7 @@ function App() {
       )}
       <div style={{ padding: "28px 32px", maxWidth: 1500, margin: "0 auto" }}>
         {tab === "dashboard" && <Dashboard projects={projects} people={people} deliverables={deliverables} setTab={setTab} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
-        {tab === "mytasks" && <MyTasksView projects={projects} people={people} deliverables={deliverables} outputs={outputs} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
+        {tab === "mytasks" && <MyTasksView projects={projects} people={people} deliverables={deliverables} outputs={outputs} setTab={setTab} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} />}
         {tab === "projects" && <ProjectsView projects={projects} people={people} deliverables={deliverables} outputs={outputs} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "project", data: null })} onEdit={p => setModal({ type: "project", data: p })} onDelete={deleteProject} onUpdateProject={upsertProject} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} onAddOutput={o => setModal({ type: "output", data: o })} onEditOutput={o => setModal({ type: "output", data: o })} />}
         {tab === "people" && <PeopleView people={people} projects={projects} deliverables={deliverables} search={search} setSearch={setSearch} onAdd={() => setModal({ type: "person", data: null })} onEdit={p => setModal({ type: "person", data: p })} onDelete={deletePerson} />}
         {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} onUpdateDeliverable={upsertDeliverable} />}
@@ -2856,11 +2856,13 @@ function TaskSection({ title, items, accent, emptyMsg, selectedPerson, projects,
 }
 
 // ── My Tasks View ─────────────────────────────────────────────────────────────
-function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverable, onUpdateDeliverable, onEditProject }) {
+function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverable, onUpdateDeliverable, setTab, setSelectedProject }) {
   const [selectedPerson, setSelectedPerson] = useState(() => {
     try { return localStorage.getItem("flare_my_person") || ""; } catch { return ""; }
   });
   const [editingCell, setEditingCell] = useState(null);
+  const [hideCompleted, setHideCompleted] = useState(false);
+  const [viewMode, setViewMode] = useState("table"); // "table" | "gantt"
   const today = new Date();
 
   const setPerson = (name) => {
@@ -2872,36 +2874,38 @@ function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverabl
   const role = person ? (Array.isArray(person.roles) ? person.roles[0] : (person.role || "")) : "";
   const rc = ROLE_COLORS[role] || "#6b7280";
 
-  // My data
   const myProjects = projects.filter(p =>
-    getLeads(p).includes(selectedPerson) ||
-    (p.teamMembers||[]).includes(selectedPerson)
+    getLeads(p).includes(selectedPerson) || (p.teamMembers||[]).includes(selectedPerson)
   );
   const myDels = deliverables.filter(d =>
     d.assignedTeam === selectedPerson || d.teamLead === selectedPerson
   );
-  const myOutputs = (outputs||[]).filter(o =>
-    (o.authors||"").toLowerCase().includes((selectedPerson||"").toLowerCase().split(" ")[0])
-  );
-  const overdue = myDels.filter(d => d.deadline && d.status !== "Completed" && d.status !== "Complete" && new Date(d.deadline) < today);
+  const myOutputs = (outputs||[]).filter(o => {
+    // Match by author name (first name, last name, or full name)
+    const authors = (o.authors||"").toLowerCase();
+    const firstName = (selectedPerson||"").split(" ")[0].toLowerCase();
+    const lastName = (selectedPerson||"").split(" ").slice(-1)[0].toLowerCase();
+    const fullName = (selectedPerson||"").toLowerCase();
+    const matchAuthor = authors.includes(firstName) || authors.includes(lastName) || authors.includes(fullName);
+    // Match by linked project (any project the person is on)
+    const matchProject = myProjects.some(p => p.id === o.project);
+    return matchAuthor || matchProject;
+  });
+  const overdue = myDels.filter(d => d.deadline && !["Completed","Complete"].includes(d.status) && new Date(d.deadline) < today);
   const dueThisWeek = myDels.filter(d => {
-    if (!d.deadline || d.status === "Completed" || d.status === "Complete") return false;
+    if (!d.deadline || ["Completed","Complete"].includes(d.status)) return false;
     const diff = (new Date(d.deadline) - today) / 86400000;
     return diff >= 0 && diff <= 7;
   });
-  const active = myDels.filter(d => d.status !== "Completed" && d.status !== "Complete");
-  const completedThisMonth = myDels.filter(d => {
-    if (d.status !== "Completed" && d.status !== "Complete") return false;
-    if (!d.deadline) return false;
-    const dd = new Date(d.deadline);
-    return dd.getMonth() === today.getMonth() && dd.getFullYear() === today.getFullYear();
-  });
+  const active = myDels.filter(d => !["Completed","Complete"].includes(d.status));
 
-  // Supervised people
+  // Portfolio summary
+  const totalBudget = myProjects.reduce((s,p) => s+(p.budget||0), 0);
+  const avgProgress = myProjects.length ? Math.round(myProjects.reduce((s,p) => s+(p.progress||0), 0) / myProjects.length) : 0;
+
   const hrReports = people.filter(m => m.hrSupervisor === selectedPerson);
   const projectSupervised = people.filter(m => (m.projectSupervisors||[]).includes(selectedPerson));
 
-  // Quick save
   const saveField = async (d, field, value) => {
     if (onUpdateDeliverable) await onUpdateDeliverable({ ...d, [field]: value });
     setEditingCell(null);
@@ -2920,25 +2924,24 @@ function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverabl
   const getQuarter = (dateStr) => {
     if (!dateStr) return "—";
     const d = new Date(dateStr);
-    const m = d.getMonth();
-    const y = d.getFullYear();
+    const m = d.getMonth(), y = d.getFullYear();
     if (m >= 6 && m <= 8)  return `Q1 ${y}/${String(y+1).slice(2)}`;
     if (m >= 9 && m <= 11) return `Q2 ${y}/${String(y+1).slice(2)}`;
     if (m >= 0 && m <= 2)  return `Q3 ${y-1}/${String(y).slice(2)}`;
     return `Q4 ${y-1}/${String(y).slice(2)}`;
   };
 
-  // ── No person selected ────────────────────────────────────────────────────
+  // ── No person selected ──────────────────────────────────────────────────
   if (!selectedPerson || !person) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400, textAlign: "center" }}>
-        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#f0f2f6", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:400, textAlign:"center" }}>
+        <div style={{ width:72, height:72, borderRadius:"50%", background:"#f0f2f6", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:20 }}>
           <Icon name="people" size={32} color="#9ca3af" />
         </div>
-        <h2 style={{ margin: "0 0 8px", fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, textTransform: "uppercase", color: "#0f1f3d" }}>Who are you?</h2>
-        <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 15 }}>Select your name to see your personal workspace. We'll remember you next time.</p>
+        <h2 style={{ margin:"0 0 8px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:28, fontWeight:900, textTransform:"uppercase", color:"#0f1f3d" }}>Who are you?</h2>
+        <p style={{ margin:"0 0 24px", color:"#6b7280", fontSize:15 }}>Select your name to see your personal workspace. We'll remember you next time.</p>
         <select value={selectedPerson} onChange={e => setPerson(e.target.value)}
-          style={{ padding: "12px 20px", border: "2px solid #0f1f3d", borderRadius: 3, fontSize: 16, outline: "none", fontFamily: "inherit", fontWeight: 600, minWidth: 280, cursor: "pointer", background: "#fff" }}>
+          style={{ padding:"12px 20px", border:"2px solid #0f1f3d", borderRadius:3, fontSize:16, outline:"none", fontFamily:"inherit", fontWeight:600, minWidth:280, cursor:"pointer", background:"#fff" }}>
           <option value="">Select your name…</option>
           {[...people].filter(p => !p.memberStatus || p.memberStatus === "active").sort((a,b) => a.name.localeCompare(b.name)).map(p => (
             <option key={p.id} value={p.name}>{p.name}</option>
@@ -2948,116 +2951,380 @@ function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverabl
     );
   }
 
-  // ── Personal workspace ────────────────────────────────────────────────────
+  // ── Gantt View ──────────────────────────────────────────────────────────
+  const GanttView = () => {
+    const delsWithDates = myDels.filter(d => d.startDate || d.deadline);
+    if (delsWithDates.length === 0) return (
+      <div style={{ padding:40, textAlign:"center", color:"#9ca3af", fontSize:14 }}>
+        Add start and end dates to your deliverables to see the Gantt chart.
+      </div>
+    );
+
+    const allDates = delsWithDates.flatMap(d => [d.startDate, d.deadline].filter(Boolean)).map(s => new Date(s));
+    const minDate = new Date(Math.min(...allDates));
+    const maxDate = new Date(Math.max(...allDates));
+    minDate.setDate(1);
+    maxDate.setMonth(maxDate.getMonth() + 1, 0);
+    const totalDays = (maxDate - minDate) / 86400000;
+
+    const getX = (dateStr) => {
+      if (!dateStr) return 0;
+      return Math.max(0, (new Date(dateStr) - minDate) / 86400000 / totalDays * 100);
+    };
+    const getW = (start, end) => {
+      const s = start ? new Date(start) : new Date(end);
+      const e = end ? new Date(end) : new Date(start);
+      return Math.max(0.5, (e - s) / 86400000 / totalDays * 100);
+    };
+
+    const todayX = (today - minDate) / 86400000 / totalDays * 100;
+
+    // Group by project for Gantt
+    const ganttByProj = {};
+    delsWithDates.forEach(d => {
+      const key = d.project || "__none";
+      if (!ganttByProj[key]) ganttByProj[key] = [];
+      ganttByProj[key].push(d);
+    });
+
+    // Generate month labels
+    const months = [];
+    const cur = new Date(minDate);
+    while (cur <= maxDate) {
+      months.push({ label: cur.toLocaleDateString("en-AU",{month:"short",year:"2-digit"}), x: (cur - minDate)/86400000/totalDays*100 });
+      cur.setMonth(cur.getMonth()+1);
+    }
+
+    return (
+      <div style={{ overflowX:"auto" }}>
+        <div style={{ minWidth:800 }}>
+          {/* Month headers */}
+          <div style={{ display:"flex", marginLeft:200, position:"relative", height:28, background:"#f8f9fb", borderBottom:"1px solid #e8eaed" }}>
+            {months.map((m,i) => (
+              <div key={i} style={{ position:"absolute", left:`${m.x}%`, fontSize:10, fontWeight:700, color:"#6b7280", textTransform:"uppercase", letterSpacing:0.5, paddingLeft:4, paddingTop:8 }}>{m.label}</div>
+            ))}
+          </div>
+
+          {Object.keys(ganttByProj).map(projId => {
+            const proj = projects.find(p => p.id === projId);
+            const dels = ganttByProj[projId].filter(d => !hideCompleted || !["Completed","Complete"].includes(d.status));
+            if (dels.length === 0) return null;
+            return (
+              <div key={projId}>
+                {/* Project row */}
+                <div style={{ display:"flex", alignItems:"center", background:"#0f1f3d", height:28 }}>
+                  <div style={{ width:200, padding:"0 12px", fontSize:11, fontWeight:800, color:"#fff", textTransform:"uppercase", letterSpacing:0.5, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flexShrink:0 }}>
+                    {proj?.name?.slice(0,28)||"No Project"}
+                  </div>
+                  <div style={{ flex:1, position:"relative", height:"100%" }}>
+                    {todayX >= 0 && todayX <= 100 && <div style={{ position:"absolute", left:`${todayX}%`, top:0, bottom:0, width:1, background:"#e85d27", opacity:0.5 }} />}
+                  </div>
+                </div>
+                {/* Deliverable rows */}
+                {dels.map((d,i) => {
+                  const isOverdue = d.deadline && !["Completed","Complete"].includes(d.status) && new Date(d.deadline) < today;
+                  const isDone = ["Completed","Complete"].includes(d.status);
+                  const barColor = isDone ? "#22c55e" : isOverdue ? "#ef4444" : "#e85d27";
+                  const x = getX(d.startDate || d.deadline);
+                  const w = d.startDate && d.deadline ? getW(d.startDate, d.deadline) : 0.5;
+                  const sc = STATUS_COLORS_MY[d.status] || STATUS_COLORS_MY["Not Started"];
+                  return (
+                    <div key={d.id} style={{ display:"flex", alignItems:"center", height:36, borderBottom:"1px solid #f0f2f5", background: i%2===0 ? "#fff" : "#fafbfd" }}>
+                      <div style={{ width:200, padding:"0 12px", flexShrink:0 }}>
+                        <div style={{ fontSize:11, fontWeight:700, color:"#0f1f3d", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={d.name}>{d.name}</div>
+                        {d.description && <div style={{ fontSize:9, color:"#9ca3af", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.description}</div>}
+                      </div>
+                      <div style={{ flex:1, position:"relative", height:"100%", padding:"4px 0" }}>
+                        {todayX >= 0 && todayX <= 100 && <div style={{ position:"absolute", left:`${todayX}%`, top:0, bottom:0, width:1, background:"#e85d2750", zIndex:0 }} />}
+                        {(d.startDate || d.deadline) && (
+                          <div style={{ position:"absolute", left:`${x}%`, width:`${w}%`, top:4, bottom:4, background:barColor, borderRadius:3, minWidth:4, display:"flex", alignItems:"center", paddingLeft:6, overflow:"hidden", cursor:"default", zIndex:1 }}
+                            title={`${d.startDate||"?"} → ${d.deadline||"?"} · ${d.progress||0}%`}>
+                            {w > 5 && <span style={{ fontSize:9, fontWeight:700, color:"#fff", whiteSpace:"nowrap", overflow:"hidden" }}>{d.progress||0}%</span>}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ width:80, padding:"0 8px", flexShrink:0 }}>
+                        <span style={{ fontSize:9, fontWeight:700, color:sc.text, background:sc.bg, padding:"2px 6px", borderRadius:99 }}>{d.status}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* Today line label */}
+          {todayX >= 0 && todayX <= 100 && (
+            <div style={{ position:"relative", height:20, marginLeft:200 }}>
+              <div style={{ position:"absolute", left:`${todayX}%`, fontSize:9, fontWeight:700, color:"#e85d27", transform:"translateX(-50%)", whiteSpace:"nowrap" }}>Today</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ── Table View — grouped by project ────────────────────────────────────
+  const TableView = () => {
+    const grouped = {};
+    myDels.forEach(d => {
+      const key = d.project || "__none";
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(d);
+    });
+
+    return (
+      <div>
+        {Object.keys(grouped).sort((a,b) => {
+          const pa = projects.find(p => p.id === a)?.name || "";
+          const pb = projects.find(p => p.id === b)?.name || "";
+          return pa.localeCompare(pb);
+        }).map(projId => {
+          const proj = projects.find(p => p.id === projId);
+          const dels = grouped[projId]
+            .filter(d => !hideCompleted || !["Completed","Complete"].includes(d.status))
+            .sort((a,b) => {
+              const aOver = a.deadline && new Date(a.deadline) < today && !["Completed","Complete"].includes(a.status);
+              const bOver = b.deadline && new Date(b.deadline) < today && !["Completed","Complete"].includes(b.status);
+              if (aOver && !bOver) return -1;
+              if (!aOver && bOver) return 1;
+              return (a.deadline||"9999") < (b.deadline||"9999") ? -1 : 1;
+            });
+          if (dels.length === 0) return null;
+
+          const projDone = dels.filter(d => ["Completed","Complete"].includes(d.status)).length;
+          const projOverdue = dels.filter(d => d.deadline && !["Completed","Complete"].includes(d.status) && new Date(d.deadline) < today).length;
+
+          return (
+            <div key={projId} style={{ marginBottom:20 }}>
+              {/* Project header — clickable */}
+              <div onClick={() => setTab && setTab("projects")}
+                style={{ background:"#0f1f3d", padding:"10px 16px", borderRadius:"3px 3px 0 0", display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background="#1a2f4e"}
+                onMouseLeave={e => e.currentTarget.style.background="#0f1f3d"}>
+                {proj?.code && <span style={{ fontSize:10, fontWeight:800, color:"#e85d27", background:"rgba(232,93,39,0.2)", padding:"2px 8px", borderRadius:2, fontFamily:"monospace" }}>{proj.code}</span>}
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:15, color:"#fff", textTransform:"uppercase", letterSpacing:0.5, flex:1 }}>
+                  {proj?.name || "No Project"}
+                </span>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.5)" }}>{projDone}/{dels.length} done</span>
+                {projOverdue > 0 && <span style={{ fontSize:11, fontWeight:700, color:"#ef4444", background:"rgba(239,68,68,0.2)", padding:"2px 8px", borderRadius:99 }}>{projOverdue} overdue</span>}
+                <div style={{ width:60, background:"rgba(255,255,255,0.1)", borderRadius:99, height:4, overflow:"hidden" }}>
+                  <div style={{ width:(proj?.progress||0)+"%", height:"100%", background:"#e85d27", borderRadius:99 }} />
+                </div>
+                <span style={{ fontSize:11, fontWeight:700, color:"#e85d27", width:32, textAlign:"right" }}>{proj?.progress||0}%</span>
+                <Icon name="projects" size={13} color="rgba(255,255,255,0.3)" />
+              </div>
+
+              {/* Deliverables table */}
+              <div style={{ background:"#fff", border:"1px solid #e2e5ea", borderTop:"none", overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead>
+                    <tr style={{ background:"#f8f9fb", borderBottom:"2px solid #e8eaed" }}>
+                      {["Quarter","Deliverable","Description","Target","Status","Progress","Notes"].map(h => (
+                        <th key={h} style={{ padding:"8px 12px", textAlign:"left", fontSize:9, fontWeight:800, color:"#9ca3af", textTransform:"uppercase", letterSpacing:1, whiteSpace:"nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dels.map((d, idx) => {
+                      const isOverdue = d.deadline && !["Completed","Complete"].includes(d.status) && new Date(d.deadline) < today;
+                      const isDone = ["Completed","Complete"].includes(d.status);
+                      const sc = STATUS_COLORS_MY[d.status] || STATUS_COLORS_MY["Not Started"];
+
+                      return (
+                        <tr key={d.id} style={{ borderBottom:"1px solid #f0f2f5", background: isOverdue ? "#fff8f8" : isDone ? "#f9fffe" : "#fff" }}>
+                          <td style={{ padding:"8px 12px", fontSize:11, fontWeight:700, color:"#6b7280", whiteSpace:"nowrap" }}>{getQuarter(d.deadline)}</td>
+
+                          {/* Deliverable name */}
+                          <td style={{ padding:"4px 12px", maxWidth:180 }} onClick={() => setEditingCell({ delId:d.id, field:"name" })}>
+                            {editingCell?.delId === d.id && editingCell?.field === "name" ? (
+                              <input autoFocus defaultValue={d.name} onBlur={e => saveField(d,"name",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"name",e.target.value)}
+                                style={{ width:"100%", padding:"3px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:12, outline:"none", fontFamily:"monospace", fontWeight:700 }} />
+                            ) : (
+                              <div style={{ fontSize:12, fontWeight:700, color: isDone?"#9ca3af":"#0f1f3d", fontFamily:"monospace", textDecoration: isDone?"line-through":"none", cursor:"text", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }} title={d.name}>{d.name}</div>
+                            )}
+                          </td>
+
+                          {/* Description */}
+                          <td style={{ padding:"4px 12px", maxWidth:200 }} onClick={() => setEditingCell({ delId:d.id, field:"description" })}>
+                            {editingCell?.delId === d.id && editingCell?.field === "description" ? (
+                              <input autoFocus defaultValue={d.description||""} onBlur={e => saveField(d,"description",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"description",e.target.value)}
+                                style={{ width:"100%", padding:"3px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none", fontFamily:"inherit" }} />
+                            ) : (
+                              <div style={{ fontSize:11, color: d.description?"#6b7280":"#d1d5db", cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={d.description}>
+                                {d.description || "Add description..."}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Target date */}
+                          <td style={{ padding:"4px 12px" }} onClick={() => setEditingCell({ delId:d.id, field:"deadline" })}>
+                            {editingCell?.delId === d.id && editingCell?.field === "deadline" ? (
+                              <input autoFocus type="date" defaultValue={d.deadline||""} onBlur={e => saveField(d,"deadline",e.target.value)}
+                                style={{ padding:"3px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none" }} />
+                            ) : (
+                              <div style={{ fontSize:11, fontWeight: isOverdue?700:400, color: isOverdue?"#dc2626":"#6b7280", cursor:"text", whiteSpace:"nowrap" }}>
+                                {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"2-digit"}) : <span style={{color:"#d1d5db"}}>—</span>}
+                                {isOverdue && " ⚠"}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Status */}
+                          <td style={{ padding:"4px 12px" }}>
+                            <select value={d.status||"Not Started"} onChange={e => saveField(d,"status",e.target.value)} onClick={e => e.stopPropagation()}
+                              style={{ padding:"3px 6px", border:"none", borderRadius:2, fontSize:11, fontWeight:700, outline:"none", cursor:"pointer", fontFamily:"inherit", background:sc.bg, color:sc.text }}>
+                              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </td>
+
+                          {/* Progress */}
+                          <td style={{ padding:"4px 12px", minWidth:120 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                              <input type="range" min="0" max="100" step="5" value={d.progress||0}
+                                onChange={e => onUpdateDeliverable({ ...d, progress:Number(e.target.value) })}
+                                onMouseUp={e => saveField(d,"progress",Number(e.target.value))}
+                                onClick={e => e.stopPropagation()}
+                                style={{ flex:1, accentColor:"#e85d27", cursor:"pointer" }} />
+                              <span style={{ fontSize:11, fontWeight:700, color:"#e85d27", width:28, textAlign:"right", flexShrink:0 }}>{d.progress||0}%</span>
+                            </div>
+                          </td>
+
+                          {/* Notes */}
+                          <td style={{ padding:"4px 12px", maxWidth:180 }} onClick={() => setEditingCell({ delId:d.id, field:"comments" })}>
+                            {editingCell?.delId === d.id && editingCell?.field === "comments" ? (
+                              <input autoFocus defaultValue={d.comments||""} onBlur={e => saveField(d,"comments",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"comments",e.target.value)}
+                                style={{ width:"100%", padding:"3px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none", fontFamily:"inherit" }} />
+                            ) : (
+                              <div style={{ fontSize:11, color: d.comments?"#374151":"#d1d5db", cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={d.comments}>
+                                {d.comments || "Add note..."}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── Main render ─────────────────────────────────────────────────────────
   return (
     <div>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "20px 24px", background: "#0f1f3d", borderRadius: 3, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
-        <div style={{ width: 56, height: 56, borderRadius: "50%", background: rc+"30", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, color: rc, flexShrink: 0, overflow: "hidden", border: `3px solid ${rc}` }}>
+      <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:20, padding:"18px 24px", background:"#0f1f3d", borderRadius:3, boxShadow:"0 2px 8px rgba(0,0,0,0.12)" }}>
+        <div style={{ width:52, height:52, borderRadius:"50%", background:rc+"30", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:20, color:rc, flexShrink:0, overflow:"hidden", border:`3px solid ${rc}` }}>
           {person.photoUrl ? <img src={person.photoUrl} alt={person.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : person.name.charAt(0)}
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>
-            {new Date().toLocaleDateString("en-AU", { weekday:"long", day:"numeric", month:"long" })}
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:1 }}>
+            {new Date().toLocaleDateString("en-AU",{ weekday:"long", day:"numeric", month:"long" })}
           </div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: 0.5 }}>
-            Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"}, {person.name.split(" ")[0]}
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:26, fontWeight:900, color:"#fff", letterSpacing:0.5 }}>
+            {new Date().getHours() < 12 ? "Morning" : new Date().getHours() < 17 ? "Afternoon" : "Evening"}, {person.name.split(" ")[0]}
           </div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{role} · {person.availability||0} FTE</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginTop:1 }}>{role} · {person.availability||0} FTE</div>
         </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        {/* Stats */}
+        <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
           {[
-            { label: "Projects", value: myProjects.length, color: "#7c3aed" },
-            { label: "Active Tasks", value: active.length, color: "#2563eb" },
-            { label: "Overdue", value: overdue.length, color: overdue.length > 0 ? "#ef4444" : "#22c55e" },
-            { label: "Due This Week", value: dueThisWeek.length, color: dueThisWeek.length > 0 ? "#f59e0b" : "#22c55e" },
+            { label:"Projects", value:myProjects.length, color:"#a78bfa" },
+            { label:"Overdue", value:overdue.length, color: overdue.length > 0 ? "#f87171" : "#4ade80" },
+            { label:"This Week", value:dueThisWeek.length, color: dueThisWeek.length > 0 ? "#fbbf24" : "#4ade80" },
+            { label:"Avg Progress", value:avgProgress+"%", color:"#e85d27" },
+            { label:"Portfolio Value", value: totalBudget>=1e6 ? "$"+(totalBudget/1e6).toFixed(1)+"M" : totalBudget>=1000 ? "$"+(totalBudget/1000).toFixed(0)+"k" : "$"+totalBudget, color:"#34d399" },
           ].map(s => (
-            <div key={s.label} style={{ textAlign: "center", minWidth: 60 }}>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 28, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 2 }}>{s.label}</div>
+            <div key={s.label} style={{ textAlign:"center" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:22, fontWeight:900, color:s.color, lineHeight:1 }}>{s.value}</div>
+              <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.8, marginTop:2 }}>{s.label}</div>
             </div>
           ))}
         </div>
-        <button onClick={() => setPerson("")} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 2, padding: "6px 12px", color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+        <button onClick={() => setPerson("")} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:2, padding:"6px 12px", color:"rgba(255,255,255,0.5)", fontSize:11, fontWeight:600, cursor:"pointer" }}>
           Switch
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-        {/* My Projects */}
-        <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
-          <div style={{ padding: "14px 18px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span>My Projects ({myProjects.length})</span>
+      {/* My Projects + Outputs row */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+        {/* Projects */}
+        <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden" }}>
+          <div style={{ padding:"13px 18px", background:"#f8f9fb", borderBottom:"2px solid #e8eaed", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, textTransform:"uppercase", letterSpacing:0.8, color:"#0f1f3d" }}>
+            My Projects ({myProjects.length})
           </div>
-          <div>
-            {myProjects.length === 0 && <div style={{ padding: "20px", fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No projects assigned</div>}
-            {myProjects.map(p => {
-              const { rag } = scoreProject(p, deliverables);
-              const isLead = getLeads(p).includes(selectedPerson);
-              const projDels = deliverables.filter(d => d.project === p.id);
-              const projOverdue = projDels.filter(d => d.deadline && d.status !== "Completed" && new Date(d.deadline) < today).length;
-              return (
-                <div key={p.id} style={{ padding: "12px 18px", borderBottom: "1px solid #f5f5f5", display: "flex", gap: 12, alignItems: "center" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: RAG_COLORS[rag], flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-                      {isLead && <span style={{ fontSize: 9, fontWeight: 800, color: "#e85d27", background: "#fff7f5", padding: "1px 6px", borderRadius: 99, border: "1px solid #fed7aa" }}>LEAD</span>}
-                      {projOverdue > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626" }}>{projOverdue} overdue</span>}
-                      <span style={{ fontSize: 10, color: "#9ca3af" }}>{p.status}</span>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 20, fontWeight: 900, color: p.progress > 0 ? "#e85d27" : "#d1d5db" }}>{p.progress||0}%</div>
+          {myProjects.length === 0 && <div style={{ padding:20, fontSize:13, color:"#9ca3af", textAlign:"center" }}>No projects assigned</div>}
+          {myProjects.map(p => {
+            const { rag } = scoreProject(p, deliverables);
+            const isLead = getLeads(p).includes(selectedPerson);
+            const projDels = deliverables.filter(d => d.project === p.id);
+            const projOverdue = projDels.filter(d => d.deadline && !["Completed","Complete"].includes(d.status) && new Date(d.deadline) < today).length;
+            return (
+              <div key={p.id} onClick={() => setTab && setTab("projects")}
+                style={{ padding:"11px 18px", borderBottom:"1px solid #f5f5f5", display:"flex", gap:12, alignItems:"center", cursor:"pointer", transition:"background 0.1s" }}
+                onMouseEnter={e => e.currentTarget.style.background="#f8faff"}
+                onMouseLeave={e => e.currentTarget.style.background="#fff"}>
+                <div style={{ width:8, height:8, borderRadius:"50%", background:RAG_COLORS[rag], flexShrink:0 }} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#0f1f3d", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
+                  <div style={{ display:"flex", gap:8, marginTop:3, alignItems:"center" }}>
+                    {isLead && <span style={{ fontSize:9, fontWeight:800, color:"#e85d27", background:"#fff7f5", padding:"1px 6px", borderRadius:99, border:"1px solid #fed7aa" }}>LEAD</span>}
+                    {projOverdue > 0 && <span style={{ fontSize:10, fontWeight:700, color:"#dc2626" }}>{projOverdue} overdue</span>}
+                    <span style={{ fontSize:10, color:"#9ca3af" }}>{p.status}</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                  <div style={{ width:50, background:"#f0f2f5", borderRadius:99, height:4, overflow:"hidden" }}>
+                    <div style={{ width:(p.progress||0)+"%", height:"100%", background:"#e85d27", borderRadius:99 }} />
+                  </div>
+                  <span style={{ fontSize:12, fontWeight:700, color:"#e85d27", width:32, textAlign:"right" }}>{p.progress||0}%</span>
+                  <Icon name="projects" size={12} color="#d1d5db" />
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Right column — outputs + supervision */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* My Outputs */}
-          <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden", flex: 1 }}>
-            <div style={{ padding: "14px 18px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>
+        {/* Right: Outputs + Supervision */}
+        <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+          <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden", flex:1 }}>
+            <div style={{ padding:"13px 18px", background:"#f8f9fb", borderBottom:"2px solid #e8eaed", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, textTransform:"uppercase", letterSpacing:0.8, color:"#0f1f3d" }}>
               My Outputs ({myOutputs.length})
             </div>
-            {myOutputs.length === 0 && <div style={{ padding: "16px 18px", fontSize: 13, color: "#9ca3af" }}>No outputs logged yet</div>}
-            {myOutputs.slice(0,4).map(o => {
+            {myOutputs.length === 0 && <div style={{ padding:"14px 18px", fontSize:13, color:"#9ca3af" }}>No outputs logged yet</div>}
+            {myOutputs.slice(0,5).map(o => {
               const done = ["Published","Live"].includes(o.status);
               return (
-                <div key={o.id} style={{ padding: "10px 18px", borderBottom: "1px solid #f5f5f5", display: "flex", gap: 10, alignItems: "center" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0f1f3d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.title}</div>
-                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{o.type} · {o.status}</div>
+                <div key={o.id} style={{ padding:"9px 18px", borderBottom:"1px solid #f5f5f5", display:"flex", gap:10, alignItems:"center" }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#0f1f3d", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{o.title}</div>
+                    <div style={{ fontSize:10, color:"#9ca3af", marginTop:1 }}>{o.type} · {o.status}</div>
                   </div>
-                  {!done && <span style={{ fontSize: 12, fontWeight: 700, color: "#e85d27", flexShrink: 0 }}>{o.progress||0}%</span>}
-                  {done && <span style={{ fontSize: 12, color: "#16a34a", flexShrink: 0 }}>✓</span>}
+                  {!done && <span style={{ fontSize:12, fontWeight:700, color:"#e85d27", flexShrink:0 }}>{o.progress||0}%</span>}
+                  {done && <span style={{ fontSize:12, color:"#16a34a", flexShrink:0 }}>✓</span>}
                 </div>
               );
             })}
           </div>
-
-          {/* Supervision */}
           {(hrReports.length > 0 || projectSupervised.length > 0) && (
-            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
-              <div style={{ padding: "14px 18px", background: "#f5f3ff", borderBottom: "2px solid #e9d5ff", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#7c3aed" }}>
-                I Supervise ({hrReports.length + projectSupervised.length})
+            <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden" }}>
+              <div style={{ padding:"13px 18px", background:"#f5f3ff", borderBottom:"2px solid #e9d5ff", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, textTransform:"uppercase", letterSpacing:0.8, color:"#7c3aed" }}>
+                I Supervise ({[...new Set([...hrReports,...projectSupervised].map(m=>m.id))].length})
               </div>
-              <div style={{ padding: "12px 18px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ padding:"12px 18px", display:"flex", flexWrap:"wrap", gap:8 }}>
                 {[...new Map([...hrReports,...projectSupervised].map(m=>[m.id,m])).values()].map(m => {
                   const mrc = ROLE_COLORS[Array.isArray(m.roles)?m.roles[0]:(m.role||"")] || "#6b7280";
-                  const isHR = hrReports.find(r => r.id === m.id);
-                  const isProject = projectSupervised.find(r => r.id === m.id);
                   return (
-                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "#f8f9fb", borderRadius: 99, border: "1px solid #e5e7eb" }}>
-                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: mrc+"20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: mrc, overflow: "hidden", flexShrink: 0 }}>
+                    <div key={m.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 10px", background:"#f8f9fb", borderRadius:99, border:"1px solid #e5e7eb" }}>
+                      <div style={{ width:20, height:20, borderRadius:"50%", background:mrc+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:800, color:mrc, overflow:"hidden", flexShrink:0 }}>
                         {m.photoUrl ? <img src={m.photoUrl} alt={m.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : m.name.charAt(0)}
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>{m.name}</span>
-                      {isHR && <span style={{ fontSize: 9, color: "#6b7280", background: "#e5e7eb", padding: "1px 5px", borderRadius: 99 }}>HR</span>}
-                      {isProject && <span style={{ fontSize: 9, color: "#7c3aed", background: "#f5f3ff", padding: "1px 5px", borderRadius: 99 }}>Project</span>}
+                      <span style={{ fontSize:11, fontWeight:700, color:"#374151" }}>{m.name}</span>
                     </div>
                   );
                 })}
@@ -3067,111 +3334,30 @@ function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverabl
         </div>
       </div>
 
-      {/* My Deliverables — inline editable board */}
-      <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "hidden" }}>
-        <div style={{ padding: "14px 20px", background: "#f8f9fb", borderBottom: "2px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 900, fontSize: 18, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d" }}>
+      {/* Deliverables section */}
+      <div style={{ background:"#fff", borderRadius:3, border:"1px solid #e2e5ea", overflow:"hidden" }}>
+        <div style={{ padding:"13px 18px", background:"#f8f9fb", borderBottom:"2px solid #e8eaed", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:18, textTransform:"uppercase", letterSpacing:0.8, color:"#0f1f3d", flex:1 }}>
             My Deliverables
-            {overdue.length > 0 && <span style={{ marginLeft: 10, fontSize: 12, color: "#dc2626", fontWeight: 700, background: "#fee2e2", padding: "2px 8px", borderRadius: 99 }}>{overdue.length} overdue</span>}
+            {overdue.length > 0 && <span style={{ marginLeft:10, fontSize:12, color:"#dc2626", fontWeight:700, background:"#fee2e2", padding:"2px 8px", borderRadius:99 }}>{overdue.length} overdue</span>}
           </div>
-          <div style={{ fontSize: 12, color: "#9ca3af" }}>Click any cell to edit</div>
+          {/* View toggle */}
+          <div style={{ display:"flex", background:"#e8eaed", borderRadius:3, overflow:"hidden" }}>
+            {[{id:"table",label:"Table"},{id:"gantt",label:"Gantt"}].map(v => (
+              <button key={v.id} onClick={() => setViewMode(v.id)}
+                style={{ padding:"6px 14px", border:"none", background: viewMode===v.id ? "#0f1f3d" : "transparent", color: viewMode===v.id ? "#fff" : "#6b7280", fontSize:11, fontWeight:700, cursor:"pointer", letterSpacing:0.5 }}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+          {/* Hide completed */}
+          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, fontWeight:600, color:"#6b7280", cursor:"pointer", userSelect:"none" }}>
+            <input type="checkbox" checked={hideCompleted} onChange={e => setHideCompleted(e.target.checked)} style={{ accentColor:"#e85d27" }} />
+            Hide completed
+          </label>
+          <div style={{ fontSize:11, color:"#9ca3af" }}>Click any cell to edit</div>
         </div>
-
-        {myDels.length === 0 ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af", fontSize: 14 }}>No deliverables assigned to you</div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f8f9fb", borderBottom: "2px solid #e8eaed" }}>
-                  {["Quarter","Project","Deliverable","Target","Status","Progress","Notes"].map(h => (
-                    <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[...myDels].sort((a,b) => {
-                  // Overdue first, then by deadline
-                  const aOver = a.deadline && new Date(a.deadline) < today && a.status !== "Completed";
-                  const bOver = b.deadline && new Date(b.deadline) < today && b.status !== "Completed";
-                  if (aOver && !bOver) return -1;
-                  if (!aOver && bOver) return 1;
-                  return (a.deadline||"9999") < (b.deadline||"9999") ? -1 : 1;
-                }).map((d, idx) => {
-                  const proj = projects.find(p => p.id === d.project);
-                  const isOverdue = d.deadline && d.status !== "Completed" && d.status !== "Complete" && new Date(d.deadline) < today;
-                  const isDone = d.status === "Completed" || d.status === "Complete";
-                  const sc = STATUS_COLORS_MY[d.status] || STATUS_COLORS_MY["Not Started"];
-
-                  return (
-                    <tr key={d.id} style={{ borderBottom: "1px solid #f0f2f5", background: isOverdue ? "#fff8f8" : isDone ? "#f9fffe" : "#fff" }}>
-                      {/* Quarter */}
-                      <td style={{ padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{getQuarter(d.deadline)}</td>
-
-                      {/* Project */}
-                      <td style={{ padding: "8px 12px", fontSize: 11, color: "#9ca3af", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={proj?.name}>{proj?.name?.slice(0,30) || "—"}</td>
-
-                      {/* Deliverable */}
-                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "name" })}>
-                        {editingCell?.delId === d.id && editingCell?.field === "name" ? (
-                          <input autoFocus defaultValue={d.name} onBlur={e => saveField(d,"name",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"name",e.target.value)}
-                            style={{ width:"100%", padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:12, outline:"none", fontFamily:"monospace", fontWeight:700 }} />
-                        ) : (
-                          <div style={{ fontSize:12, fontWeight:700, color: isDone ? "#9ca3af" : "#0f1f3d", fontFamily:"monospace", textDecoration: isDone ? "line-through" : "none", cursor:"text", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:220 }} title={d.name}>{d.name}</div>
-                        )}
-                      </td>
-
-                      {/* Target date */}
-                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "deadline" })}>
-                        {editingCell?.delId === d.id && editingCell?.field === "deadline" ? (
-                          <input autoFocus type="date" defaultValue={d.deadline||""} onBlur={e => saveField(d,"deadline",e.target.value)}
-                            style={{ padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none" }} />
-                        ) : (
-                          <div style={{ fontSize:11, fontWeight: isOverdue ? 700 : 400, color: isOverdue ? "#dc2626" : "#6b7280", cursor:"text", whiteSpace:"nowrap" }}>
-                            {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"2-digit"}) : <span style={{color:"#d1d5db"}}>—</span>}
-                            {isOverdue && " ⚠"}
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Status */}
-                      <td style={{ padding: "4px 12px" }}>
-                        <select value={d.status||"Not Started"} onChange={e => saveField(d,"status",e.target.value)} onClick={e => e.stopPropagation()}
-                          style={{ padding:"3px 6px", border:"none", borderRadius:2, fontSize:11, fontWeight:700, outline:"none", cursor:"pointer", fontFamily:"inherit", background:sc.bg, color:sc.text }}>
-                          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </td>
-
-                      {/* Progress */}
-                      <td style={{ padding: "4px 12px", minWidth: 130 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                          <input type="range" min="0" max="100" step="5" value={d.progress||0}
-                            onChange={e => onUpdateDeliverable({ ...d, progress: Number(e.target.value) })}
-                            onMouseUp={e => saveField(d,"progress",Number(e.target.value))}
-                            onClick={e => e.stopPropagation()}
-                            style={{ flex:1, accentColor:"#e85d27", cursor:"pointer" }} />
-                          <span style={{ fontSize:11, fontWeight:700, color:"#e85d27", width:28, textAlign:"right", flexShrink:0 }}>{d.progress||0}%</span>
-                        </div>
-                      </td>
-
-                      {/* Notes */}
-                      <td style={{ padding: "4px 12px" }} onClick={() => setEditingCell({ delId: d.id, field: "comments" })}>
-                        {editingCell?.delId === d.id && editingCell?.field === "comments" ? (
-                          <input autoFocus defaultValue={d.comments||""} onBlur={e => saveField(d,"comments",e.target.value)} onKeyDown={e => e.key==="Enter" && saveField(d,"comments",e.target.value)}
-                            style={{ width:"100%", padding:"4px 6px", border:"2px solid #e85d27", borderRadius:2, fontSize:11, outline:"none", fontFamily:"inherit" }} />
-                        ) : (
-                          <div style={{ fontSize:11, color: d.comments ? "#374151" : "#d1d5db", cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:200 }} title={d.comments}>
-                            {d.comments || "Add note..."}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {viewMode === "table" ? <TableView /> : <GanttView />}
       </div>
     </div>
   );
