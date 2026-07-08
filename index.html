@@ -581,7 +581,11 @@ function App() {
 
   const upsertDeliverable = async (del) => {
     const isNew = !deliverables.find(d => d.id === del.id);
-    const record = isNew ? { ...del, id: "d" + Date.now() } : del;
+    // Auto-set progress to 100 when marked completed
+    const autoRec = (del.status === "Completed" || del.status === "Complete")
+      ? { ...del, progress: 100 }
+      : del;
+    const record = isNew ? { ...autoRec, id: "d" + Date.now() } : autoRec;
     setSyncing(true);
     try {
       await saveRecord("deliverables", record);
