@@ -3300,13 +3300,17 @@ function MyTasksView({ projects, people, deliverables, outputs, onEditDeliverabl
             {myOutputs.slice(0,5).map(o => {
               const done = ["Published","Live"].includes(o.status);
               return (
-                <div key={o.id} style={{ padding:"9px 18px", borderBottom:"1px solid #f5f5f5", display:"flex", gap:10, alignItems:"center" }}>
+                <div key={o.id} onClick={() => setTab && setTab("outputs")}
+                  style={{ padding:"9px 18px", borderBottom:"1px solid #f5f5f5", display:"flex", gap:10, alignItems:"center", cursor:"pointer", transition:"background 0.1s" }}
+                  onMouseEnter={e => e.currentTarget.style.background="#f8faff"}
+                  onMouseLeave={e => e.currentTarget.style.background="#fff"}>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:12, fontWeight:700, color:"#0f1f3d", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{o.title}</div>
                     <div style={{ fontSize:10, color:"#9ca3af", marginTop:1 }}>{o.type} · {o.status}</div>
                   </div>
                   {!done && <span style={{ fontSize:12, fontWeight:700, color:"#e85d27", flexShrink:0 }}>{o.progress||0}%</span>}
                   {done && <span style={{ fontSize:12, color:"#16a34a", flexShrink:0 }}>✓</span>}
+                  <Icon name="star" size={12} color="#d1d5db" />
                 </div>
               );
             })}
