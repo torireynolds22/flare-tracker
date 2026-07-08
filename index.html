@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FLARE — Research Tracker</title>
+    <!-- v2.1 -->
   <link rel="icon" href="https://www.flarewildfire.com/wp-content/uploads/2021/11/FLARE-FavIcon-2021.svg" type="image/svg+xml">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -703,6 +704,7 @@ function App() {
     { id: "projects", label: "Projects", icon: "projects" },
     { id: "people", label: "People", icon: "people" },
     { id: "deliverables", label: "Deliverables", icon: "deliverables" },
+    { id: "board", label: "Board", icon: "deliverables" },
     { id: "outputs", label: "Outputs", icon: "star" },
     { id: "grants", label: "Grants", icon: "budget" },
     { id: "contacts", label: "Contacts", icon: "people" },
@@ -856,6 +858,7 @@ function App() {
         {tab === "projects" && <ProjectsView projects={projects} people={people} deliverables={deliverables} outputs={outputs} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "project", data: null })} onEdit={p => setModal({ type: "project", data: p })} onDelete={deleteProject} onUpdateProject={upsertProject} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} onAddOutput={o => setModal({ type: "output", data: o })} onEditOutput={o => setModal({ type: "output", data: o })} />}
         {tab === "people" && <PeopleView people={people} projects={projects} deliverables={deliverables} search={search} setSearch={setSearch} onAdd={() => setModal({ type: "person", data: null })} onEdit={p => setModal({ type: "person", data: p })} onDelete={deletePerson} />}
         {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} onUpdateDeliverable={upsertDeliverable} />}
+        {tab === "board" && <BoardView projects={projects} people={people} deliverables={deliverables} onUpdateDeliverable={upsertDeliverable} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} />}
         {tab === "outputs" && <OutputsView outputs={outputs} projects={projects} people={people} onAdd={() => setModal({ type: "output", data: null })} onEdit={o => setModal({ type: "output", data: o })} onDelete={deleteOutput} />}
         {tab === "grants" && <GrantsView grants={grants} people={people} onAdd={() => setModal({ type: "grant", data: null })} onEdit={g => setModal({ type: "grant", data: g })} onDelete={deleteGrant} onConvertToProject={g => { const leadNames = g.leads || (g.lead ? [g.lead] : []); setModal({ type: "project", data: { name: g.title, summary: `Converted from grant: ${g.funder}${g.scheme ? " — "+g.scheme : ""}`, budget: g.amount || 0, status: "In Progress", lead: leadNames, teamMembers: g.teamMembers || [], startDate: new Date().toISOString().slice(0,10), tags: ["Grant"] } }); }} />}
         {tab === "contacts" && <ContactsView contacts={contacts} projects={projects} onAdd={() => setModal({ type: "contact", data: null })} onEdit={c => setModal({ type: "contact", data: c })} onDelete={deleteContact} />}
@@ -4529,6 +4532,324 @@ function OnboardingView({ people, checklist, setChecklist, trainingWants, setTra
 }
 
 
+
+// ── Board View ────────────────────────────────────────────────────────────────
+function BoardView({ projects, people, deliverables, onUpdateDeliverable, onAdd, onEdit, onDelete }) {
+  const [filterProject, setFilterProject] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [hideComplete, setHideComplete] = useState(false);
+  const [editingCell, setEditingCell] = useState(null); // { delId, field }
+  const today = new Date();
+
+  const STATUSES = ["Not Started", "In Progress", "Complete", "Blocked", "On Hold"];
+  const STATUS_COLORS = {
+    "Not Started": { bg: "#f3f4f6", text: "#6b7280", dot: "#9ca3af" },
+    "In Progress": { bg: "#fef9c3", text: "#854d0e", dot: "#eab308" },
+    "Complete":    { bg: "#dcfce7", text: "#166534", dot: "#22c55e" },
+    "Blocked":     { bg: "#fee2e2", text: "#991b1b", dot: "#ef4444" },
+    "On Hold":     { bg: "#f3f4f6", text: "#4b5563", dot: "#9ca3af" },
+    "Completed":   { bg: "#dcfce7", text: "#166534", dot: "#22c55e" },
+  };
+
+  // Derive quarter label from date
+  const getQuarter = (dateStr) => {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    const m = d.getMonth(); // 0-indexed
+    const y = d.getFullYear();
+    // Australian financial year quarters
+    if (m >= 6 && m <= 8)  return `Q1 ${y}/${String(y+1).slice(2)}`;
+    if (m >= 9 && m <= 11) return `Q2 ${y}/${String(y+1).slice(2)}`;
+    if (m >= 0 && m <= 2)  return `Q3 ${y-1}/${String(y).slice(2)}`;
+    return `Q4 ${y-1}/${String(y).slice(2)}`;
+  };
+
+  const filtered = deliverables.filter(d => {
+    const matchProj = filterProject === "All" || d.project === filterProject;
+    const matchStatus = filterStatus === "All" || d.status === filterStatus;
+    const matchHide = !hideComplete || (d.status !== "Complete" && d.status !== "Completed");
+    return matchProj && matchStatus && matchHide;
+  });
+
+  // Group by project
+  const byProject = {};
+  filtered.forEach(d => {
+    const key = d.project || "__none";
+    if (!byProject[key]) byProject[key] = [];
+    byProject[key].push(d);
+  });
+
+  // Portfolio stats
+  const totalDone = deliverables.filter(d => d.status === "Complete" || d.status === "Completed").length;
+  const totalOverdue = deliverables.filter(d => d.deadline && d.status !== "Complete" && d.status !== "Completed" && new Date(d.deadline) < today).length;
+  const totalValue = projects.reduce((s, p) => s + (p.budget || 0), 0);
+  const overallPct = projects.length ? Math.round(projects.reduce((s,p) => s+(p.progress||0), 0)/projects.length) : 0;
+
+  const InlineCell = ({ d, field, children, style }) => {
+    const isEditing = editingCell?.delId === d.id && editingCell?.field === field;
+    return (
+      <td style={{ padding: "0", ...style }} onClick={() => !isEditing && setEditingCell({ delId: d.id, field })}>
+        {children(isEditing, () => setEditingCell(null))}
+      </td>
+    );
+  };
+
+  const saveField = async (d, field, value) => {
+    await onUpdateDeliverable({ ...d, [field]: value });
+    setEditingCell(null);
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <h1 style={{ margin: 0, fontFamily: "'Barlow Condensed',sans-serif", fontSize: 34, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Delivery Board</h1>
+          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14 }}>{filtered.length} deliverables · inline editable</p>
+        </div>
+        <button onClick={onAdd} style={{ padding: "9px 18px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="plus" size={13} color="#fff" /> Add Deliverable
+        </button>
+      </div>
+
+      {/* Portfolio summary card */}
+      <div style={{ background: "#1a1f2e", borderRadius: 3, padding: "20px 24px", marginBottom: 20, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>Portfolio</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>All projects · {deliverables.length} deliverables</div>
+        </div>
+        <div style={{ width: 1, background: "rgba(255,255,255,0.1)", height: 40, flexShrink: 0 }} />
+        {[
+          { label: "Overall", value: overallPct + "%", color: "#e85d27" },
+          { label: "Done", value: totalDone + "/" + deliverables.length, color: "#22c55e" },
+          { label: "Overdue", value: totalOverdue, color: totalOverdue > 0 ? "#ef4444" : "#22c55e" },
+          { label: "Contracted Value", value: "$" + (totalValue/1e6).toFixed(2) + "M", color: "#fff" },
+        ].map(s => (
+          <div key={s.label}>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>{s.label}</div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 22, fontWeight: 900, color: s.color }}>{s.value}</div>
+          </div>
+        ))}
+        {/* overall progress bar */}
+        <div style={{ flex: 1, minWidth: 120 }}>
+          <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: 99, height: 6, overflow: "hidden" }}>
+            <div style={{ width: overallPct + "%", height: "100%", background: "#e85d27", borderRadius: 99 }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, fontSize: 12, outline: "none", background: "#fff", cursor: "pointer" }}>
+          <option value="All">All projects</option>
+          {projects.sort((a,b) => a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name.slice(0,50)}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: "8px 12px", border: "1.5px solid #dde1e9", borderRadius: 2, fontSize: 12, outline: "none", background: "#fff", cursor: "pointer" }}>
+          <option value="All">All statuses</option>
+          {STATUSES.map(s => <option key={s}>{s}</option>)}
+        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#6b7280", cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={hideComplete} onChange={e => setHideComplete(e.target.checked)} />
+          Hide complete
+        </label>
+        <div style={{ marginLeft: "auto", fontSize: 12, color: "#9ca3af" }}>Click any cell to edit inline</div>
+      </div>
+
+      {/* Project swimlanes */}
+      {Object.keys(byProject).sort((a,b) => {
+        const pa = projects.find(p => p.id === a)?.name || "";
+        const pb = projects.find(p => p.id === b)?.name || "";
+        return pa.localeCompare(pb);
+      }).map(projId => {
+        const proj = projects.find(p => p.id === projId);
+        const dels = byProject[projId];
+        const done = dels.filter(d => d.status === "Complete" || d.status === "Completed").length;
+        const overdue = dels.filter(d => d.deadline && d.status !== "Complete" && d.status !== "Completed" && new Date(d.deadline) < today).length;
+        const pct = proj?.progress || 0;
+
+        return (
+          <div key={projId} style={{ marginBottom: 28 }}>
+            {/* Project header */}
+            <div style={{ background: "#0f1f3d", borderRadius: "3px 3px 0 0", padding: "10px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              {proj?.code && <span style={{ fontSize: 10, fontWeight: 800, color: "#e85d27", background: "rgba(232,93,39,0.15)", padding: "2px 8px", borderRadius: 2, letterSpacing: 0.8, fontFamily: "monospace" }}>{proj.code}</span>}
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 15, color: "#fff", textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{proj?.name || "No Project"}</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{done}/{dels.length} done</span>
+              {overdue > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.15)", padding: "2px 8px", borderRadius: 99 }}>{overdue} overdue</span>}
+              <div style={{ width: 80, background: "rgba(255,255,255,0.1)", borderRadius: 99, height: 5, overflow: "hidden" }}>
+                <div style={{ width: pct + "%", height: "100%", background: "#e85d27", borderRadius: 99 }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#e85d27", width: 36, textAlign: "right" }}>{pct}%</span>
+            </div>
+
+            {/* Table */}
+            <div style={{ background: "#fff", border: "1px solid #e2e5ea", borderTop: "none", overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: 90 }} />  {/* Phase/Quarter */}
+                  <col style={{ width: "25%" }} /> {/* Deliverable */}
+                  <col style={{ width: 130 }} /> {/* Lead */}
+                  <col style={{ width: 110 }} /> {/* Start */}
+                  <col style={{ width: 110 }} /> {/* Target */}
+                  <col style={{ width: 120 }} /> {/* Status */}
+                  <col style={{ width: 140 }} /> {/* Progress */}
+                  <col />                          {/* Notes */}
+                  <col style={{ width: 40 }} />   {/* Tent */}
+                  <col style={{ width: 32 }} />   {/* Delete */}
+                </colgroup>
+                <thead>
+                  <tr style={{ background: "#f8f9fb", borderBottom: "2px solid #e8eaed" }}>
+                    {["Quarter", "Deliverable", "Lead", "Start", "Target", "Status", "Progress", "Notes", "Tent.", ""].map(h => (
+                      <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dels.map((d, idx) => {
+                    const isOverdue = d.deadline && d.status !== "Complete" && d.status !== "Completed" && new Date(d.deadline) < today;
+                    const sc = STATUS_COLORS[d.status] || STATUS_COLORS["Not Started"];
+                    const quarter = getQuarter(d.deadline);
+                    const isTentative = d.tentative;
+
+                    return (
+                      <tr key={d.id} style={{ borderBottom: "1px solid #f0f2f5", background: isTentative ? "repeating-linear-gradient(45deg,#fff,#fff 8px,#fafafa 8px,#fafafa 16px)" : "#fff" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#f8faff"}
+                        onMouseLeave={e => e.currentTarget.style.background = isTentative ? "repeating-linear-gradient(45deg,#fff,#fff 8px,#fafafa 8px,#fafafa 16px)" : "#fff"}>
+
+                        {/* Quarter */}
+                        <td style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{quarter}</td>
+
+                        {/* Deliverable name */}
+                        <td style={{ padding: "4px 8px" }} onClick={() => setEditingCell({ delId: d.id, field: "name" })}>
+                          {editingCell?.delId === d.id && editingCell?.field === "name" ? (
+                            <input autoFocus defaultValue={d.name} onBlur={e => saveField(d, "name", e.target.value)}
+                              onKeyDown={e => e.key === "Enter" && saveField(d, "name", e.target.value)}
+                              style={{ width: "100%", padding: "4px 6px", border: "2px solid #e85d27", borderRadius: 2, fontSize: 12, outline: "none", fontFamily: "monospace", fontWeight: 700 }} />
+                          ) : (
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#0f1f3d", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}
+                              title={d.name}>{d.name || <span style={{ color: "#d1d5db" }}>Click to add...</span>}</div>
+                          )}
+                        </td>
+
+                        {/* Lead */}
+                        <td style={{ padding: "4px 8px" }} onClick={() => setEditingCell({ delId: d.id, field: "assignedTeam" })}>
+                          {editingCell?.delId === d.id && editingCell?.field === "assignedTeam" ? (
+                            <select autoFocus value={d.assignedTeam||""} onChange={e => saveField(d, "assignedTeam", e.target.value)}
+                              onBlur={e => saveField(d, "assignedTeam", e.target.value)}
+                              style={{ width: "100%", padding: "4px 6px", border: "2px solid #e85d27", borderRadius: 2, fontSize: 12, outline: "none", fontFamily: "inherit" }}>
+                              <option value="">— None —</option>
+                              {[...people].sort((a,b) => a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                            </select>
+                          ) : (
+                            <div style={{ fontSize: 12, color: d.assignedTeam ? "#374151" : "#d1d5db", cursor: "text", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {d.assignedTeam || "—"}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Start date */}
+                        <td style={{ padding: "4px 8px" }} onClick={() => setEditingCell({ delId: d.id, field: "startDate" })}>
+                          {editingCell?.delId === d.id && editingCell?.field === "startDate" ? (
+                            <input autoFocus type="date" defaultValue={d.startDate||""} onBlur={e => saveField(d, "startDate", e.target.value)}
+                              style={{ width: "100%", padding: "4px 6px", border: "2px solid #e85d27", borderRadius: 2, fontSize: 11, outline: "none" }} />
+                          ) : (
+                            <div style={{ fontSize: 11, color: "#6b7280", cursor: "text", whiteSpace: "nowrap" }}>
+                              {d.startDate ? new Date(d.startDate).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"2-digit" }) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Target date */}
+                        <td style={{ padding: "4px 8px" }} onClick={() => setEditingCell({ delId: d.id, field: "deadline" })}>
+                          {editingCell?.delId === d.id && editingCell?.field === "deadline" ? (
+                            <input autoFocus type="date" defaultValue={d.deadline||""} onBlur={e => saveField(d, "deadline", e.target.value)}
+                              style={{ width: "100%", padding: "4px 6px", border: "2px solid #e85d27", borderRadius: 2, fontSize: 11, outline: "none" }} />
+                          ) : (
+                            <div style={{ fontSize: 11, fontWeight: isOverdue ? 700 : 400, color: isOverdue ? "#dc2626" : "#6b7280", cursor: "text", whiteSpace: "nowrap" }}>
+                              {d.deadline ? new Date(d.deadline).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"2-digit" }) : <span style={{ color: "#d1d5db" }}>—</span>}
+                              {isOverdue && " ⚠"}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: "4px 8px" }}>
+                          <select value={d.status||"Not Started"} onChange={e => saveField(d, "status", e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            style={{ padding: "3px 6px", border: "none", borderRadius: 2, fontSize: 11, fontWeight: 700, outline: "none", cursor: "pointer", fontFamily: "inherit", background: sc.bg, color: sc.text, width: "100%" }}>
+                            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
+
+                        {/* Progress */}
+                        <td style={{ padding: "4px 8px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <input type="range" min="0" max="100" step="5" value={d.progress||0}
+                              onChange={e => onUpdateDeliverable({ ...d, progress: Number(e.target.value) })}
+                              onMouseUp={e => saveField(d, "progress", Number(e.target.value))}
+                              onClick={e => e.stopPropagation()}
+                              style={{ flex: 1, accentColor: "#e85d27", cursor: "pointer" }} />
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#e85d27", width: 28, textAlign: "right", flexShrink: 0 }}>{d.progress||0}%</span>
+                          </div>
+                        </td>
+
+                        {/* Notes */}
+                        <td style={{ padding: "4px 8px" }} onClick={() => setEditingCell({ delId: d.id, field: "comments" })}>
+                          {editingCell?.delId === d.id && editingCell?.field === "comments" ? (
+                            <input autoFocus defaultValue={d.comments||""} onBlur={e => saveField(d, "comments", e.target.value)}
+                              onKeyDown={e => e.key === "Enter" && saveField(d, "comments", e.target.value)}
+                              style={{ width: "100%", padding: "4px 6px", border: "2px solid #e85d27", borderRadius: 2, fontSize: 11, outline: "none", fontFamily: "inherit" }} />
+                          ) : (
+                            <div style={{ fontSize: 11, color: d.comments ? "#374151" : "#d1d5db", cursor: "text", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.comments}>
+                              {d.comments || "Add note..."}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Tentative */}
+                        <td style={{ padding: "4px 8px", textAlign: "center" }}>
+                          <input type="checkbox" checked={!!d.tentative} onChange={e => saveField(d, "tentative", e.target.checked)}
+                            onClick={e => e.stopPropagation()}
+                            style={{ width: 14, height: 14, cursor: "pointer", accentColor: "#e85d27" }} />
+                        </td>
+
+                        {/* Delete */}
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <button onClick={e => { e.stopPropagation(); if(confirm("Delete?")) onDelete(d.id); }}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, opacity: 0.3, display: "flex", alignItems: "center" }}
+                            onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+                            onMouseLeave={e => e.currentTarget.style.opacity = "0.3"}>
+                            <Icon name="trash" size={13} color="#dc2626" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Add row */}
+                  <tr>
+                    <td colSpan={10} style={{ padding: "6px 10px" }}>
+                      <button onClick={() => onAdd({ project: projId })}
+                        style={{ background: "none", border: "1.5px dashed #dde1e9", borderRadius: 2, padding: "4px 12px", fontSize: 11, fontWeight: 600, color: "#9ca3af", cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                        <Icon name="plus" size={12} color="#9ca3af" /> Add deliverable
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+
+      {filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>No deliverables match your filters</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Outputs View ──────────────────────────────────────────────────────────────
 function OutputsView({ outputs, projects, people, onAdd, onEdit, onDelete }) {
   const [search, setSearch] = useState("");
@@ -5550,8 +5871,10 @@ function DeliverableModal({ data, projects, people, onSave, onClose }) {
   const [form, setForm] = useState({
     id: data?.id || "", name: data?.name || "", project: data?.project || "",
     description: data?.description || "", deadline: data?.deadline || "",
+    startDate: data?.startDate || "",
     status: data?.status || "Not Started", assignedTeam: data?.assignedTeam || "",
     teamLead: data?.teamLead || "", comments: data?.comments || "",
+    progress: data?.progress || 0, tentative: data?.tentative || false,
   });
   const set = k => v => setForm(f => ({ ...f, [k]: v }));
 
@@ -5572,6 +5895,19 @@ function DeliverableModal({ data, projects, people, onSave, onClose }) {
       </div>
       <Field label="Description"><Textarea value={form.description} onChange={set("description")} placeholder="What does this deliverable involve?" /></Field>
       <Field label="Comments"><Textarea value={form.comments} onChange={set("comments")} placeholder="Any notes or updates…" rows={2} /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Start Date"><Input type="date" value={form.startDate} onChange={set("startDate")} /></Field>
+        <Field label="Progress (%)">
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="range" min="0" max="100" step="5" value={form.progress} onChange={e => set("progress")(Number(e.target.value))} style={{ flex: 1 }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#e85d27", width: 36 }}>{form.progress}%</span>
+          </div>
+        </Field>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#374151" }}>
+        <input type="checkbox" checked={form.tentative} onChange={e => set("tentative")(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#e85d27" }} />
+        Tentative (uncertain timing or scope)
+      </label>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8 }}>
         <button onClick={onClose} style={{ padding: "10px 24px", border: "1.5px solid #dde1e9", borderRadius: 2, background: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 12, letterSpacing: 1, textTransform: "uppercase", color: "#0f1f3d" }}>Cancel</button>
         <button onClick={handleSave} style={{ padding: "10px 24px", background: "#e85d27", color: "#fff", border: "none", borderRadius: 2, cursor: "pointer", fontWeight: 700, fontSize: 12, letterSpacing: 1, textTransform: "uppercase" }}>Save</button>
