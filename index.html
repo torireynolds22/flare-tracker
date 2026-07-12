@@ -9,6 +9,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700;800;900&family=Barlow+Condensed:wght@600;700;800;900&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -869,7 +870,7 @@ function App() {
         {tab === "onboarding" && <OnboardingView people={people} checklist={onboardingChecklist} setChecklist={setOnboardingChecklist} trainingWants={onboardingTraining} setTrainingWants={setOnboardingTraining} trainingNotes={onboardingNotes} setTrainingNotes={setOnboardingNotes} onSave={saveOnboarding} />}
         {tab === "management" && (
           mgmtUnlocked
-            ? <ManagementView projects={projects} people={people} deliverables={deliverables} outputs={outputs} salaryAllocations={salaryAllocations} onSaveSalary={saveSalaryAllocation} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} />
+            ? <ManagementView projects={projects} people={people} deliverables={deliverables} outputs={outputs} salaryAllocations={salaryAllocations} onSaveSalary={saveSalaryAllocation} onLock={() => setMgmtUnlocked(false)} onEditProject={p => setModal({ type: "project", data: p })} onUpdateProject={upsertProject} />
             : <PinGate onUnlock={() => setMgmtUnlocked(true)} />
         )}
       </div>
@@ -3562,7 +3563,7 @@ function SalaryEditor({ person, allocation, projects, onSave, onCancel }) {
 }
 
 
-function ManagementView({ projects, people, deliverables, outputs: allOutputs, salaryAllocations: salaryAllocsProp, onSaveSalary, onLock, onEditProject }) {
+function ManagementView({ projects, people, deliverables, outputs: allOutputs, salaryAllocations: salaryAllocsProp, onSaveSalary, onLock, onEditProject, onUpdateProject }) {
   const [mgmtTab, setMgmtTab] = useState("health");
   const today = new Date();
 
@@ -3619,6 +3620,116 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
     .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
   const [exporting, setExporting] = useState(false);
+  const [workdayData, setWorkdayData] = useState([]);
+  const [workdayError, setWorkdayError] = useState("");
+  const [workdayImporting, setWorkdayImporting] = useState(false);
+
+  const parseWorkdayFile = (file) => {
+    setWorkdayError("");
+    setWorkdayData([]);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+        // Detect format by checking headers
+        const headerRow = rows.find(r => r.some(c => String(c).includes("Project") && r.length > 3));
+        if (!headerRow) { setWorkdayError("Could not find data headers in this file."); return; }
+
+        const headers = headerRow.map(h => String(h).trim());
+        const dataRows = rows.slice(rows.indexOf(headerRow) + 1).filter(r => {
+          const first = String(r[0] || "").trim();
+          return first.startsWith("PRJ") && first !== "Total";
+        });
+
+        if (dataRows.length === 0) { setWorkdayError("No project rows found. Make sure the file contains PRJ codes."); return; }
+
+        // Determine format
+        const isDetailedFormat = headers.some(h => h.includes("Total Award") || h.includes("Salaries"));
+        const isSummaryFormat = headers.some(h => h.includes("Contract Value") && headers.some(h2 => h2.includes("Income")));
+
+        const get = (row, ...names) => {
+          for (const name of names) {
+            const idx = headers.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+            if (idx >= 0) return parseFloat(row[idx]) || 0;
+          }
+          return 0;
+        };
+
+        const parsed = dataRows.map(row => {
+          const rawName = String(row[0]).trim();
+          // Extract PRJ code — always at start
+          const code = rawName.match(/^(PRJ_\w+)/)?.[1] || rawName.split(" ")[0];
+          const projectName = rawName;
+
+          let contractValue, incomeReceived, salarySpend, otherSpend, totalSpend, remaining, overhead;
+
+          if (isDetailedFormat) {
+            contractValue = get(row, "Total Award");
+            incomeReceived = get(row, "Total Customer Invoiced");
+            salarySpend = get(row, "Salaries");
+            overhead = get(row, "Overhead Expenses");
+            otherSpend = get(row, "Other Expenses") + overhead;
+            totalSpend = salarySpend + otherSpend + get(row, "Manual Journals") + get(row, "Shared Grants Expenses");
+            remaining = get(row, "Contract Value Total Award - Spend - Committed Spend") || (contractValue - totalSpend);
+          } else {
+            // Project Summary format
+            contractValue = get(row, "Contract Value");
+            incomeReceived = get(row, "Income");
+            salarySpend = get(row, "Salary");
+            otherSpend = get(row, "Non Salary");
+            totalSpend = get(row, "Expenditure") || (salarySpend + otherSpend);
+            remaining = get(row, "Balance Including Carried Forward & Commitments") || get(row, "Balance");
+          }
+
+          // Match to tracker project by PRJ code
+          const matchedProject = projects.find(p =>
+            p.code && (
+              p.code.trim().toUpperCase() === code.toUpperCase() ||
+              p.code.trim().toUpperCase().replace("PRJ_","") === code.toUpperCase().replace("PRJ_","")
+            )
+          );
+
+          return {
+            code, projectName, contractValue, incomeReceived,
+            salarySpend, otherSpend, totalSpend, remaining,
+            matched: !!matchedProject, matchedProject,
+            selected: !!matchedProject,
+          };
+        });
+
+        setWorkdayData(parsed);
+      } catch (err) {
+        setWorkdayError("Failed to parse file: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const applyWorkdayImport = async () => {
+    const toImport = workdayData.filter(r => r.matched && r.selected);
+    if (toImport.length === 0) return;
+    setWorkdayImporting(true);
+    for (const row of toImport) {
+      const proj = row.matchedProject;
+      const updated = {
+        ...proj,
+        budget: row.contractValue || proj.budget,
+        budgetSpent: row.totalSpend || proj.budgetSpent,
+        workdayIncome: row.incomeReceived,
+        workdaySalary: row.salarySpend,
+        workdayOther: row.otherSpend,
+        workdayRemaining: row.remaining,
+        workdayUpdated: new Date().toISOString(),
+      };
+      if (onUpdateProject) await onUpdateProject(updated);
+    }
+    setWorkdayImporting(false);
+    setWorkdayData([]);
+    alert(`✓ Imported financials for ${toImport.length} project${toImport.length !== 1 ? "s" : ""}. Budget data has been updated.`);
+  };
   const [salarySearch, setSalarySearch] = useState("");
   const [salarySort, setSalarySort] = useState("role");
   const [salaryRoleFilter, setSalaryRoleFilter] = useState("All");
@@ -3635,6 +3746,7 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
     { id: "budget", label: "Budget", icon: "budget" },
     { id: "deadlines", label: "Deadlines", icon: "calendar" },
     { id: "salary", label: "Salary Allocations", icon: "budget" },
+    { id: "workday", label: "Workday Import", icon: "budget" },
     { id: "peoplereport", label: "People Report", icon: "people" },
     { id: "projectreport", label: "Project Report", icon: "projects" },
   ];
