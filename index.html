@@ -296,7 +296,10 @@ const FOR_CODES = [
 ];
 
 
-// ── Project RAG Scoring ───────────────────────────────────────────────────────
+// ── Management password ───────────────────────────────────────────────────────
+const MGMT_PASSWORD = "fire2024";
+
+
 function scoreProject(project, deliverables) {
   const dels = (deliverables || []).filter(d => d.project === project.id);
   const overdue = dels.filter(d => d.deadline && d.status !== "Completed" && new Date(d.deadline) < new Date()).length;
@@ -709,7 +712,6 @@ function App() {
     { id: "projects", label: "Projects", icon: "projects" },
     { id: "people", label: "People", icon: "people" },
     { id: "deliverables", label: "Deliverables", icon: "deliverables" },
-    { id: "board", label: "Board", icon: "deliverables" },
     { id: "outputs", label: "Outputs", icon: "star" },
     { id: "grants", label: "Grants", icon: "budget" },
     { id: "contacts", label: "Contacts", icon: "people" },
@@ -863,7 +865,6 @@ function App() {
         {tab === "projects" && <ProjectsView projects={projects} people={people} deliverables={deliverables} outputs={outputs} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "project", data: null })} onEdit={p => setModal({ type: "project", data: p })} onDelete={deleteProject} onUpdateProject={upsertProject} onEditDeliverable={d => setModal({ type: "deliverable", data: d })} onUpdateDeliverable={upsertDeliverable} onAddOutput={o => setModal({ type: "output", data: o })} onEditOutput={o => setModal({ type: "output", data: o })} />}
         {tab === "people" && <PeopleView people={people} projects={projects} deliverables={deliverables} search={search} setSearch={setSearch} onAdd={() => setModal({ type: "person", data: null })} onEdit={p => setModal({ type: "person", data: p })} onDelete={deletePerson} />}
         {tab === "deliverables" && <DeliverablesView deliverables={deliverables} projects={projects} people={people} search={search} setSearch={setSearch} filterStatus={filterStatus} setFilterStatus={setFilterStatus} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} onUpdateDeliverable={upsertDeliverable} />}
-        {tab === "board" && <BoardView projects={projects} people={people} deliverables={deliverables} onUpdateDeliverable={upsertDeliverable} onAdd={() => setModal({ type: "deliverable", data: null })} onEdit={d => setModal({ type: "deliverable", data: d })} onDelete={deleteDeliverable} />}
         {tab === "outputs" && <OutputsView outputs={outputs} projects={projects} people={people} onAdd={() => setModal({ type: "output", data: null })} onEdit={o => setModal({ type: "output", data: o })} onDelete={deleteOutput} />}
         {tab === "grants" && <GrantsView grants={grants} people={people} onAdd={() => setModal({ type: "grant", data: null })} onEdit={g => setModal({ type: "grant", data: g })} onDelete={deleteGrant} onConvertToProject={g => { const leadNames = g.leads || (g.lead ? [g.lead] : []); setModal({ type: "project", data: { name: g.title, summary: `Converted from grant: ${g.funder}${g.scheme ? " — "+g.scheme : ""}`, budget: g.amount || 0, status: "In Progress", lead: leadNames, teamMembers: g.teamMembers || [], startDate: new Date().toISOString().slice(0,10), tags: ["Grant"] } }); }} />}
         {tab === "contacts" && <ContactsView contacts={contacts} projects={projects} onAdd={() => setModal({ type: "contact", data: null })} onEdit={c => setModal({ type: "contact", data: c })} onDelete={deleteContact} />}
