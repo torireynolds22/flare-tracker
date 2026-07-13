@@ -4351,7 +4351,139 @@ function ManagementView({ projects, people, deliverables, outputs: allOutputs, s
         );
       })()}
 
-      {/* ── People Report ── */}
+      {/* ── Workday Import ── */}
+      {mgmtTab === "workday" && (
+        <div>
+          <div style={{ marginBottom: 20 }}>
+            <h2 style={{ margin: "0 0 6px", fontFamily: "'Barlow Condensed',sans-serif", fontSize: 26, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "#0f1f3d" }}>Workday Finance Import</h2>
+            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Upload exports from Workday to update project financials. PRJ codes are matched automatically.</p>
+          </div>
+
+          {/* Upload zone */}
+          <div
+            style={{ background: "#fff", borderRadius: 3, border: "2px dashed #dde1e9", padding: "40px 32px", textAlign: "center", marginBottom: 20, cursor: "pointer" }}
+            onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = "#e85d27"; e.currentTarget.style.background = "#fff7f5"; }}
+            onDragLeave={e => { e.currentTarget.style.borderColor = "#dde1e9"; e.currentTarget.style.background = "#fff"; }}
+            onDrop={e => {
+              e.preventDefault();
+              e.currentTarget.style.borderColor = "#dde1e9";
+              e.currentTarget.style.background = "#fff";
+              const file = e.dataTransfer.files[0];
+              if (file) parseWorkdayFile(file);
+            }}
+            onClick={() => document.getElementById("workday-file-input").click()}>
+            <input id="workday-file-input" type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }}
+              onChange={e => { if (e.target.files[0]) parseWorkdayFile(e.target.files[0]); e.target.value = ""; }} />
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Drop Workday export here or click to browse</div>
+            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 16 }}>Accepts .xlsx files — Project Summary or CR UOM External Funders Report</div>
+            <div style={{ display: "inline-block", padding: "10px 24px", background: "#e85d27", color: "#fff", borderRadius: 2, fontSize: 12, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Choose File</div>
+          </div>
+
+          {workdayError && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 3, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#dc2626", display: "flex", alignItems: "center", gap: 8 }}>
+              ⚠ {workdayError}
+            </div>
+          )}
+
+          {workdayData.length > 0 && (
+            <div>
+              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 3, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                <div style={{ fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                  ✓ Found {workdayData.length} project{workdayData.length !== 1 ? "s" : ""}
+                  · <span style={{ color: "#16a34a" }}>{workdayData.filter(r => r.matched).length} matched</span>
+                  · <span style={{ color: "#d97706" }}>{workdayData.filter(r => !r.matched).length} unmatched</span>
+                </div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <label style={{ fontSize: 12, color: "#6b7280", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" onChange={e => setWorkdayData(prev => prev.map(r => r.matched ? { ...r, selected: e.target.checked } : r))} defaultChecked />
+                    Select all matched
+                  </label>
+                  <button onClick={applyWorkdayImport} disabled={workdayImporting || workdayData.filter(r => r.matched && r.selected).length === 0}
+                    style={{ padding: "9px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.8, textTransform: "uppercase", opacity: workdayData.filter(r => r.matched && r.selected).length === 0 ? 0.5 : 1 }}>
+                    {workdayImporting ? "Importing..." : `Import ${workdayData.filter(r => r.matched && r.selected).length} Project${workdayData.filter(r => r.matched && r.selected).length !== 1 ? "s" : ""}`}
+                  </button>
+                  <button onClick={() => setWorkdayData([])} style={{ padding: "9px 14px", background: "#fff", border: "1.5px solid #dde1e9", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#6b7280" }}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                  <thead>
+                    <tr style={{ background: "#f8f9fb", borderBottom: "2px solid #e8eaed" }}>
+                      <th style={{ padding: "10px 14px", width: 36 }}></th>
+                      {["PRJ Code","Tracker Project","Contract Value","Income Received","Salary","Other Spend","Total Spend","Remaining","Match"].map(h => (
+                        <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workdayData.map((row, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #f0f2f5", background: !row.matched ? "#fffbf0" : row.selected ? "#f0fdf4" : "#fff" }}>
+                        <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                          {row.matched && (
+                            <input type="checkbox" checked={!!row.selected}
+                              onChange={e => setWorkdayData(prev => prev.map((r,j) => j === i ? { ...r, selected: e.target.checked } : r))} />
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 14px", fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#0f1f3d", whiteSpace: "nowrap" }}>{row.code}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {row.matched
+                            ? <span style={{ color: "#16a34a", fontWeight: 600 }}>✓ {row.matchedProject?.name?.slice(0, 45)}</span>
+                            : <span style={{ color: "#d97706" }}>⚠ {row.projectName?.slice(0, 45)}</span>}
+                        </td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "#374151", whiteSpace: "nowrap" }}>${(row.contractValue||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "#16a34a", fontWeight: 600, whiteSpace: "nowrap" }}>${(row.incomeReceived||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "#374151", whiteSpace: "nowrap" }}>${(row.salarySpend||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "#374151", whiteSpace: "nowrap" }}>${(row.otherSpend||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, fontWeight: 700, color: "#e85d27", whiteSpace: "nowrap" }}>${(row.totalSpend||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", color: (row.remaining||0) < 0 ? "#dc2626" : "#16a34a" }}>${(row.remaining||0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, color: row.matched ? "#166534" : "#92400e", background: row.matched ? "#dcfce7" : "#fef9c3" }}>
+                            {row.matched ? "Matched" : "No match"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {workdayData.some(r => !r.matched) && (
+                <div style={{ marginTop: 10, padding: "10px 16px", background: "#fef9c3", border: "1px solid #fde68a", borderRadius: 3, fontSize: 12, color: "#92400e" }}>
+                  <strong>Unmatched rows</strong> — check that the PRJ code is set correctly on those projects in Edit Project.
+                </div>
+              )}
+            </div>
+          )}
+
+          {workdayData.length === 0 && !workdayError && (
+            <div style={{ background: "#fff", borderRadius: 3, border: "1px solid #e2e5ea", padding: "28px 32px" }}>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 16, textTransform: "uppercase", letterSpacing: 0.8, color: "#0f1f3d", marginBottom: 16 }}>How to export from Workday</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                {[
+                  { title: "Project Summary", steps: ["Workday → Reports → Project Summary", "Set your project filter", "Export to Excel (.xlsx)"] },
+                  { title: "External Funders Report", steps: ["Workday → CR UOM Summary of Project Financials", "Select 'External Funders Report — By Project'", "Export to Excel (.xlsx)"] },
+                ].map(guide => (
+                  <div key={guide.title} style={{ background: "#f8f9fb", borderRadius: 3, padding: "16px 18px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f1f3d", marginBottom: 10 }}>{guide.title}</div>
+                    {guide.steps.map((s, si) => (
+                      <div key={si} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 12, color: "#6b7280", alignItems: "flex-start" }}>
+                        <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#e85d27", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{si+1}</span>
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+            {/* ── People Report ── */}
             {mgmtTab === "peoplereport" && (
         <div>
           {/* Summary stats */}
